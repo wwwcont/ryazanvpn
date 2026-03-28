@@ -1,0 +1,267 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/example/ryazanvpn/internal/domain/access"
+	"github.com/example/ryazanvpn/internal/domain/audit"
+	"github.com/example/ryazanvpn/internal/domain/device"
+	"github.com/example/ryazanvpn/internal/domain/node"
+	"github.com/example/ryazanvpn/internal/domain/operation"
+)
+
+var ErrUserAlreadyHasActiveDevice = errors.New("user already has active device")
+
+type CreateDeviceForUserInput struct {
+	UserID   string
+	Name     string
+	Platform string
+}
+
+type CreateDeviceForUserOutput struct {
+	Device              *device.Device
+	Access              *access.DeviceAccess
+	PrivateKey          string
+	Node                *node.Node
+	ConfigDownloadToken string
+}
+
+type CreateDeviceForUser struct {
+	Devices            DeviceRepository
+	Nodes              NodeRepository
+	Accesses           DeviceAccessRepository
+	Operations         NodeOperationRepository
+	AuditLogs          AuditLogRepository
+	KeyGenerator       KeyGenerator
+	IPAllocator        IPAllocator
+	NodeAssigner       NodeAssigner
+	CreatePeerExecutor *ExecuteCreatePeerOperation
+	ConfigIssuer       *IssueDeviceConfig
+	ServerPublicKey    string
+	EndpointHost       string
+	EndpointPort       int
+	DNS                []string
+	Keepalive          int
+	TokenTTL           time.Duration
+}
+
+func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUserInput) (*CreateDeviceForUserOutput, error) {
+	if existing, err := uc.Devices.GetActiveByUserID(ctx, in.UserID); err == nil && existing != nil {
+		return nil, ErrUserAlreadyHasActiveDevice
+	} else if err != nil && !errors.Is(err, device.ErrNotFound) {
+		return nil, err
+	}
+
+	publicKey, privateKey, err := uc.KeyGenerator.Generate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	activeNodes, err := uc.Nodes.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	selectedNode, err := uc.NodeAssigner.Assign(activeNodes)
+	if err != nil {
+		return nil, err
+	}
+
+	assignedIP, err := uc.IPAllocator.Allocate(ctx, selectedNode.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	createdDevice, err := uc.Devices.Create(ctx, device.CreateParams{
+		UserID:    in.UserID,
+		VPNNodeID: &selectedNode.ID,
+		PublicKey: publicKey,
+		Name:      in.Name,
+		Platform:  in.Platform,
+		Status:    device.StatusActive,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	createdAccess, err := uc.Accesses.Create(ctx, access.CreateParams{
+		DeviceID:   createdDevice.ID,
+		VPNNodeID:  selectedNode.ID,
+		Status:     access.StatusPending,
+		AssignedIP: &assignedIP,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"device_id":   createdDevice.ID,
+		"access_id":   createdAccess.ID,
+		"public_key":  publicKey,
+		"assigned_ip": assignedIP,
+		"protocol":    "wireguard",
+		"keepalive":   25,
+	})
+
+	op, err := uc.Operations.Create(ctx, operation.CreateParams{
+		VPNNodeID:     selectedNode.ID,
+		OperationType: operation.TypeCreatePeer,
+		Status:        operation.StatusQueued,
+		PayloadJSON:   string(payload),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if uc.CreatePeerExecutor != nil {
+		if err := uc.CreatePeerExecutor.Execute(ctx, op.ID); err != nil {
+			return nil, err
+		}
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"device_id":    createdDevice.ID,
+		"node_id":      selectedNode.ID,
+		"access_id":    createdAccess.ID,
+		"operation_id": op.ID,
+	})
+	_, err = uc.AuditLogs.Create(ctx, audit.CreateParams{
+		ActorUserID: &in.UserID,
+		EntityType:  "device",
+		EntityID:    &createdDevice.ID,
+		Action:      "create_device_for_user",
+		DetailsJSON: string(details),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create audit log: %w", err)
+	}
+
+	issuedToken := ""
+	if uc.ConfigIssuer != nil {
+		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
+			DeviceAccessID:   createdAccess.ID,
+			DevicePrivateKey: privateKey,
+			ServerPublicKey:  uc.ServerPublicKey,
+			AssignedIP:       assignedIP,
+			DNS:              uc.DNS,
+			EndpointHost:     valueOrDefault(uc.EndpointHost, selectedNode.Endpoint),
+			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, 51820),
+			Keepalive:        valueOrDefaultInt(uc.Keepalive, 25),
+			TokenTTL:         uc.TokenTTL,
+		})
+		if err != nil {
+			return nil, err
+		}
+		issuedToken = cfgOut.Token
+	}
+
+	return &CreateDeviceForUserOutput{Device: createdDevice, Access: createdAccess, PrivateKey: privateKey, Node: selectedNode, ConfigDownloadToken: issuedToken}, nil
+}
+
+type AssignNodeForDeviceInput struct {
+	DeviceID string
+}
+
+type AssignNodeForDevice struct {
+	Devices      DeviceRepository
+	Nodes        NodeRepository
+	NodeAssigner NodeAssigner
+}
+
+func (uc AssignNodeForDevice) Execute(ctx context.Context, in AssignNodeForDeviceInput) (*node.Node, error) {
+	nodes, err := uc.Nodes.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := uc.NodeAssigner.Assign(nodes)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.Devices.AssignNode(ctx, in.DeviceID, selected.ID); err != nil {
+		return nil, err
+	}
+	return selected, nil
+}
+
+type CreateDeviceAccessInput struct {
+	DeviceID  string
+	VPNNodeID string
+}
+
+type CreateDeviceAccess struct {
+	Accesses    DeviceAccessRepository
+	IPAllocator IPAllocator
+}
+
+func (uc CreateDeviceAccess) Execute(ctx context.Context, in CreateDeviceAccessInput) (*access.DeviceAccess, error) {
+	ip, err := uc.IPAllocator.Allocate(ctx, in.VPNNodeID)
+	if err != nil {
+		return nil, err
+	}
+	return uc.Accesses.Create(ctx, access.CreateParams{
+		DeviceID:   in.DeviceID,
+		VPNNodeID:  in.VPNNodeID,
+		Status:     access.StatusPending,
+		AssignedIP: &ip,
+	})
+}
+
+type RevokeDeviceAccessInput struct {
+	AccessID string
+}
+
+type RevokeDeviceAccess struct {
+	Accesses           DeviceAccessRepository
+	Operations         NodeOperationRepository
+	AuditLogs          AuditLogRepository
+	RevokePeerExecutor *ExecuteRevokePeerOperation
+}
+
+func (uc RevokeDeviceAccess) Execute(ctx context.Context, in RevokeDeviceAccessInput) error {
+	accessEntry, err := uc.Accesses.GetByID(ctx, in.AccessID)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(map[string]any{"access_id": accessEntry.ID, "device_id": accessEntry.DeviceID})
+	op, err := uc.Operations.Create(ctx, operation.CreateParams{
+		VPNNodeID:     accessEntry.VPNNodeID,
+		OperationType: operation.TypeRevokePeer,
+		Status:        operation.StatusQueued,
+		PayloadJSON:   string(payload),
+	})
+	if err != nil {
+		return err
+	}
+
+	if uc.RevokePeerExecutor != nil {
+		if err := uc.RevokePeerExecutor.Execute(ctx, op.ID, accessEntry.ID); err != nil {
+			return err
+		}
+	}
+
+	details, _ := json.Marshal(map[string]any{"access_id": accessEntry.ID, "operation_id": op.ID})
+	_, err = uc.AuditLogs.Create(ctx, audit.CreateParams{
+		EntityType:  "device_access",
+		EntityID:    &accessEntry.ID,
+		Action:      "revoke_device_access",
+		DetailsJSON: string(details),
+	})
+	return err
+}
+
+type ListUserDevicesInput struct {
+	UserID string
+}
+
+type ListUserDevices struct {
+	Devices DeviceRepository
+}
+
+func (uc ListUserDevices) Execute(ctx context.Context, in ListUserDevicesInput) ([]*device.Device, error) {
+	return uc.Devices.ListByUserID(ctx, in.UserID)
+}
