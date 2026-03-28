@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 )
 
 type fakeNodeHealthRepo struct {

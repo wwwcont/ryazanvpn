@@ -11,13 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/agent/runtime"
-	"github.com/example/ryazanvpn/internal/agent/shell"
-	"github.com/example/ryazanvpn/internal/app"
-	"github.com/example/ryazanvpn/internal/infra/cache"
-	"github.com/example/ryazanvpn/internal/infra/db"
-	"github.com/example/ryazanvpn/internal/infra/logging"
-	"github.com/example/ryazanvpn/internal/transport/httpnode"
+	"github.com/wwwcont/ryazanvpn/internal/agent/runtime"
+	"github.com/wwwcont/ryazanvpn/internal/agent/shell"
+	"github.com/wwwcont/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/infra/logging"
+	"github.com/wwwcont/ryazanvpn/internal/transport/httpnode"
 )
 
 func main() {
@@ -34,17 +32,6 @@ func main() {
 	logger := logging.NewJSONLogger(cfg.LogLevel)
 	logger.Info("starting service", slog.String("config", cfg.String()))
 
-	ctx := context.Background()
-	pg, err := db.NewPool(ctx, cfg.PostgresURL)
-	if err != nil {
-		logger.Error("postgres init failed", slog.Any("error", err))
-		os.Exit(1)
-	}
-	defer pg.Close()
-
-	redisClient := cache.NewClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
-	defer redisClient.Close()
-
 	vpnRuntime, err := buildRuntime(cfg, logger)
 	if err != nil {
 		logger.Error("runtime init failed", slog.Any("error", err))
@@ -53,8 +40,6 @@ func main() {
 
 	router := httpnode.NewRouter(httpnode.Options{
 		Logger:           logger,
-		PG:               pg,
-		RedisClient:      redisClient,
 		ReadinessTimeout: cfg.ReadinessTimeout,
 		Runtime:          vpnRuntime,
 		HMACSecret:       cfg.AgentHMACSecret,

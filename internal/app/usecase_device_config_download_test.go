@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/access"
-	"github.com/example/ryazanvpn/internal/domain/token"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 )
 
 func TestIssueAndDownloadDeviceConfig(t *testing.T) {

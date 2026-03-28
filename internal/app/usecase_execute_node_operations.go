@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 )
 
 type createPeerPayload struct {

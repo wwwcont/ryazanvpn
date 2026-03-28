@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/access"
-	"github.com/example/ryazanvpn/internal/domain/audit"
-	"github.com/example/ryazanvpn/internal/domain/device"
-	"github.com/example/ryazanvpn/internal/domain/node"
-	"github.com/example/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/audit"
+	"github.com/wwwcont/ryazanvpn/internal/domain/device"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 )
 
 var ErrUserAlreadyHasActiveDevice = errors.New("user already has active device")

@@ -1,4 +1,4 @@
-module github.com/example/ryazanvpn
+module github.com/wwwcont/ryazanvpn
 
 go 1.24
 

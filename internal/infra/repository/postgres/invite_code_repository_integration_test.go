@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/example/ryazanvpn/internal/domain/invitecode"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/example/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/app"
 )
 
 func TestRenderAmneziaWG(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/device"
+	"github.com/wwwcont/ryazanvpn/internal/domain/device"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

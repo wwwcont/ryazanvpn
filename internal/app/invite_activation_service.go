@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/example/ryazanvpn/internal/domain/invitecode"
-	"github.com/example/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
 var (

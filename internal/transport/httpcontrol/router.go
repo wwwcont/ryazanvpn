@@ -15,13 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/example/ryazanvpn/internal/app"
-	"github.com/example/ryazanvpn/internal/domain/audit"
-	"github.com/example/ryazanvpn/internal/domain/device"
-	"github.com/example/ryazanvpn/internal/domain/invitecode"
-	"github.com/example/ryazanvpn/internal/domain/node"
-	"github.com/example/ryazanvpn/internal/domain/user"
-	"github.com/example/ryazanvpn/internal/transport/httpcommon"
+	"github.com/wwwcont/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/domain/audit"
+	"github.com/wwwcont/ryazanvpn/internal/domain/device"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/transport/httpcommon"
 	"log/slog"
 )
 

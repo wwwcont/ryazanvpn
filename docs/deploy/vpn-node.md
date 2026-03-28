@@ -12,8 +12,6 @@ Create `/etc/ryazanvpn/node-agent.env`:
 
 ```env
 HTTP_ADDR=:8081
-POSTGRES_URL=postgres://vpn:vpn@127.0.0.1:5432/vpn?sslmode=disable
-REDIS_ADDR=127.0.0.1:6379
 LOG_LEVEL=info
 AGENT_HMAC_SECRET=change-me
 RUNTIME_ADAPTER=mock
@@ -23,6 +21,8 @@ WG_BINARY_PATH=/usr/bin/wg
 IP_BINARY_PATH=/usr/sbin/ip
 RUNTIME_EXEC_TIMEOUT=10s
 ```
+
+`node-agent` не требует PostgreSQL/Redis для startup, `/health`, `/ready` и операций apply/revoke.
 
 ## 3) Install systemd unit
 
