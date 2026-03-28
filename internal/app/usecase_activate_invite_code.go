@@ -29,10 +29,10 @@ type ActivateInviteCodeInput struct {
 }
 
 type ActivateInviteCodeRepos interface {
-	Users() UserRepository
-	InviteCodes() InviteCodeRepository
+	Users() user.Repository
+	InviteCodes() invitecode.Repository
 	AccessGrants() accessgrant.Repository
-	AuditLogs() AuditLogRepository
+	AuditLogs() audit.Repository
 }
 
 type ActivateInviteCodeStore interface {

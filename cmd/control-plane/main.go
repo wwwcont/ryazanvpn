@@ -54,7 +54,7 @@ func main() {
 	opRepo := pgrepo.NewNodeOperationRepository(pg)
 	trafficRepo := pgrepo.NewTrafficRepository(pg)
 
-	nodeHTTPClient := nodeclient.NewClient(nodeclient.Config{
+	nodeHTTPClient := nodeclient.New(nodeclient.Config{
 		BaseURL:    cfg.NodeAgentBaseURL,
 		Secret:     cfg.NodeAgentSecret,
 		Timeout:    cfg.NodeAgentTimeout,
@@ -106,7 +106,7 @@ func main() {
 					ConfigIssuer: &app.IssueDeviceConfig{
 						Accesses:  accessRepo,
 						Tokens:    tokenRepo,
-						Renderer:  configrenderer.AmneziaWGRenderer{},
+						Renderer:  configrenderer.NewAmneziaWGRenderer(),
 						Encryptor: encryptor,
 					},
 				},
