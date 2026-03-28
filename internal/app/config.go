@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,13 @@ type Config struct {
 	WGBinaryPath           string
 	IPBinaryPath           string
 	RuntimeExecTimeout     time.Duration
+	RuntimeStatsBinaryPath string
+	RuntimeStatsArgs       []string
+	TelegramBotToken       string
+	TelegramWebhookSecret  string
+	PublicBaseURL          string
+	TelegramStateTTL       time.Duration
+	TelegramAdminIDs       []int64
 }
 
 // LoadConfig reads and validates service configuration from env.
@@ -69,6 +77,13 @@ func LoadConfig(serviceName string) (Config, error) {
 		WGBinaryPath:           envOrDefault("WG_BINARY_PATH", "/usr/bin/wg"),
 		IPBinaryPath:           envOrDefault("IP_BINARY_PATH", "/usr/sbin/ip"),
 		RuntimeExecTimeout:     durationFromEnv("RUNTIME_EXEC_TIMEOUT", 10*time.Second),
+		RuntimeStatsBinaryPath: os.Getenv("RUNTIME_STATS_BINARY_PATH"),
+		RuntimeStatsArgs:       csvListFromEnv("RUNTIME_STATS_ARGS"),
+		TelegramBotToken:       os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramWebhookSecret:  os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
+		PublicBaseURL:          envOrDefault("PUBLIC_BASE_URL", "http://localhost:8080"),
+		TelegramStateTTL:       durationFromEnv("TELEGRAM_STATE_TTL", 24*time.Hour),
+		TelegramAdminIDs:       int64ListFromEnv("TELEGRAM_ADMIN_IDS"),
 	}
 
 	if cfg.HTTPAddr == "" {
@@ -120,6 +135,43 @@ func durationFromEnv(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func int64ListFromEnv(key string) []int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]int64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+func csvListFromEnv(key string) []string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (c Config) String() string {

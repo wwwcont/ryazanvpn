@@ -31,6 +31,13 @@ type Config struct {
 	MaxRetries int
 }
 
+type TrafficCounter struct {
+	DeviceAccessID  string     `json:"device_access_id"`
+	RXTotalBytes    int64      `json:"rx_total_bytes"`
+	TXTotalBytes    int64      `json:"tx_total_bytes"`
+	LastHandshakeAt *time.Time `json:"last_handshake_at,omitempty"`
+}
+
 type Client struct {
 	baseURL    string
 	secret     []byte
@@ -57,6 +64,35 @@ func (c *Client) ApplyPeer(ctx context.Context, req OperationRequest) error {
 
 func (c *Client) RevokePeer(ctx context.Context, req OperationRequest) error {
 	return c.do(ctx, http.MethodPost, "/agent/v1/operations/revoke-peer", req)
+}
+
+func (c *Client) GetTrafficCounters(ctx context.Context) ([]TrafficCounter, error) {
+	ts := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	body := []byte("{}")
+	sig := c.sign(ts, body)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/agent/v1/traffic/counters", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("X-Agent-Timestamp", ts)
+	httpReq.Header.Set("X-Agent-Signature", sig)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("node-agent traffic failed: status=%d body=%s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		Items []TrafficCounter `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, payload OperationRequest) error {

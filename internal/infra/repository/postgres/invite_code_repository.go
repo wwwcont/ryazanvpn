@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 )
 
 type InviteCodeRepository struct {
@@ -147,6 +147,37 @@ RETURNING id::text, code, status, max_activations, current_activations, exhauste
 
 	out, err := scanInviteCode(r.q.QueryRow(ctx, query, in.Code, in.Status, in.MaxActivations, in.ExpiresAt, in.CreatedByUserID))
 	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *InviteCodeRepository) ListRecent(ctx context.Context, limit int) ([]*invitecode.InviteCode, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	const query = `
+SELECT id::text, code, status, max_activations, current_activations, exhausted_at, expires_at,
+       created_by_user_id::text, created_at, updated_at
+FROM invite_codes
+ORDER BY created_at DESC
+LIMIT $1`
+
+	rows, err := r.q.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*invitecode.InviteCode
+	for rows.Next() {
+		item, err := scanInviteCode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return out, nil

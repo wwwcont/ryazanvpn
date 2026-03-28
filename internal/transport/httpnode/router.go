@@ -52,6 +52,7 @@ func NewRouter(opts Options) http.Handler {
 		r.Use(HMACAuthMiddleware(opts.HMACSecret, opts.HMACMaxSkew))
 		r.Post("/agent/v1/operations/apply-peer", applyPeerHandler(opts.Logger, opts.Runtime))
 		r.Post("/agent/v1/operations/revoke-peer", revokePeerHandler(opts.Logger, opts.Runtime))
+		r.Get("/agent/v1/traffic/counters", trafficCountersHandler(opts.Logger, opts.Runtime))
 	})
 
 	return r

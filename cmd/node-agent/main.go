@@ -89,11 +89,13 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 	if adapter == "shell" {
 		logger.Info("runtime adapter selected", slog.String("adapter", "shell"))
 		rt := runtime.NewShellRuntime(logger, runtime.ShellRuntimeConfig{
-			WorkDir:        cfg.RuntimeWorkDir,
-			AWGBinaryPath:  cfg.AWGBinaryPath,
-			WGBinaryPath:   cfg.WGBinaryPath,
-			IPBinaryPath:   cfg.IPBinaryPath,
-			CommandTimeout: cfg.RuntimeExecTimeout,
+			WorkDir:         cfg.RuntimeWorkDir,
+			AWGBinaryPath:   cfg.AWGBinaryPath,
+			WGBinaryPath:    cfg.WGBinaryPath,
+			IPBinaryPath:    cfg.IPBinaryPath,
+			StatsBinaryPath: cfg.RuntimeStatsBinaryPath,
+			StatsArgs:       cfg.RuntimeStatsArgs,
+			CommandTimeout:  cfg.RuntimeExecTimeout,
 		}, shell.NewOSExecutor(logger))
 
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)

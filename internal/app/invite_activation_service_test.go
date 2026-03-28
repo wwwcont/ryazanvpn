@@ -98,6 +98,10 @@ func (f *fakeUserRepo) GetByTelegramID(ctx context.Context, telegramID int64) (*
 	return f.u, nil
 }
 
+func (f *fakeUserRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {
+	panic("unexpected call")
+}
+
 func (f *fakeUserRepo) Create(ctx context.Context, in user.CreateParams) (*user.User, error) {
 	panic("unexpected call")
 }
@@ -136,5 +140,9 @@ func (f *fakeInviteRepo) HasActivationByUser(ctx context.Context, inviteCodeID, 
 }
 
 func (f *fakeInviteRepo) Create(ctx context.Context, in invitecode.CreateParams) (*invitecode.InviteCode, error) {
+	panic("unexpected call")
+}
+
+func (f *fakeInviteRepo) ListRecent(ctx context.Context, limit int) ([]*invitecode.InviteCode, error) {
 	panic("unexpected call")
 }

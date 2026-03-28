@@ -21,6 +21,7 @@ type User struct {
 
 type Repository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*User, error)
+	GetByUsername(ctx context.Context, username string) (*User, error)
 	Create(ctx context.Context, in CreateParams) (*User, error)
 	GetByID(ctx context.Context, id string) (*User, error)
 }

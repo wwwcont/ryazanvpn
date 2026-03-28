@@ -12,10 +12,13 @@ import (
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
 	"github.com/wwwcont/ryazanvpn/internal/infra/cache"
+	configrenderer "github.com/wwwcont/ryazanvpn/internal/infra/configrenderer"
 	"github.com/wwwcont/ryazanvpn/internal/infra/crypto"
 	"github.com/wwwcont/ryazanvpn/internal/infra/db"
 	"github.com/wwwcont/ryazanvpn/internal/infra/logging"
+	"github.com/wwwcont/ryazanvpn/internal/infra/nodeclient"
 	pgrepo "github.com/wwwcont/ryazanvpn/internal/infra/repository/postgres"
+	"github.com/wwwcont/ryazanvpn/internal/infra/telegram"
 	"github.com/wwwcont/ryazanvpn/internal/transport/httpcontrol"
 )
 
@@ -45,8 +48,21 @@ func main() {
 	deviceRepo := pgrepo.NewDeviceRepository(pg)
 	inviteRepo := pgrepo.NewInviteCodeRepository(pg)
 	auditRepo := pgrepo.NewAuditLogRepository(pg)
+	accessRepo := pgrepo.NewDeviceAccessRepository(pg)
+	tokenRepo := pgrepo.NewConfigDownloadTokenRepository(pg)
+	accessGrantRepo := pgrepo.NewAccessGrantRepository(pg)
+	opRepo := pgrepo.NewNodeOperationRepository(pg)
+	trafficRepo := pgrepo.NewTrafficRepository(pg)
+
+	nodeHTTPClient := nodeclient.NewClient(nodeclient.Config{
+		BaseURL:    cfg.NodeAgentBaseURL,
+		Secret:     cfg.NodeAgentSecret,
+		Timeout:    cfg.NodeAgentTimeout,
+		MaxRetries: cfg.NodeAgentRetries,
+	})
 
 	var downloadUC *app.DownloadDeviceConfigByToken
+	var telegramWebhookHandler http.Handler
 	if cfg.ConfigMasterKey != "" {
 		encryptor, err := crypto.NewAESGCMServiceFromBase64(cfg.ConfigMasterKey)
 		if err != nil {
@@ -54,9 +70,60 @@ func main() {
 			os.Exit(1)
 		}
 		downloadUC = &app.DownloadDeviceConfigByToken{
-			Tokens:    pgrepo.NewConfigDownloadTokenRepository(pg),
-			Accesses:  pgrepo.NewDeviceAccessRepository(pg),
+			Tokens:    tokenRepo,
+			Accesses:  accessRepo,
 			Encryptor: encryptor,
+		}
+
+		if cfg.TelegramBotToken != "" {
+			adminIDs := make(map[int64]struct{}, len(cfg.TelegramAdminIDs))
+			for _, id := range cfg.TelegramAdminIDs {
+				adminIDs[id] = struct{}{}
+			}
+
+			tgSvc := &telegram.TelegramService{
+				Logger:           logger,
+				Bot:              &telegram.HTTPBotClient{Token: cfg.TelegramBotToken},
+				States:           telegram.RedisStateStore{Redis: redisClient, TTL: cfg.TelegramStateTTL},
+				RegisterUC:       app.RegisterTelegramUser{Users: userRepo},
+				ActivateInviteUC: app.ActivateInviteCode{Store: pgrepo.NewInviteActivationStore(pg)},
+				GetGrantUC:       app.GetActiveAccessGrantByUser{AccessGrants: accessGrantRepo},
+				CreateDeviceUC: app.CreateDeviceForUser{
+					Devices:      deviceRepo,
+					Nodes:        nodeRepo,
+					Accesses:     accessRepo,
+					Operations:   opRepo,
+					AuditLogs:    auditRepo,
+					KeyGenerator: telegram.X25519KeyGenerator{},
+					IPAllocator:  telegram.RedisIPAllocator{Redis: redisClient},
+					NodeAssigner: app.MinLoadNodeAssigner{},
+					CreatePeerExecutor: &app.ExecuteCreatePeerOperation{
+						Operations: opRepo,
+						Accesses:   accessRepo,
+						Nodes:      nodeRepo,
+						NodeClient: nodeclient.AppAdapter{Client: nodeHTTPClient},
+					},
+					ConfigIssuer: &app.IssueDeviceConfig{
+						Accesses:  accessRepo,
+						Tokens:    tokenRepo,
+						Renderer:  configrenderer.AmneziaWGRenderer{},
+						Encryptor: encryptor,
+					},
+				},
+				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: auditRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeclient.AppAdapter{Client: nodeHTTPClient}}},
+				Users:           userRepo,
+				Devices:         deviceRepo,
+				Accesses:        accessRepo,
+				Tokens:          tokenRepo,
+				AccessGrants:    accessGrantRepo,
+				InviteCodes:     inviteRepo,
+				AuditLogs:       auditRepo,
+				Nodes:           nodeRepo,
+				Traffic:         trafficRepo,
+				DownloadBaseURL: cfg.PublicBaseURL,
+				AdminIDs:        adminIDs,
+			}
+			telegramWebhookHandler = telegram.WebhookHandler{SecretToken: cfg.TelegramWebhookSecret, Service: tgSvc}
 		}
 	}
 
@@ -73,6 +140,7 @@ func main() {
 		Devices:           deviceRepo,
 		InviteCodes:       inviteRepo,
 		AuditLogs:         auditRepo,
+		TelegramWebhook:   telegramWebhookHandler,
 	})
 
 	srv := &http.Server{
@@ -96,6 +164,15 @@ func main() {
 		Client: &http.Client{
 			Timeout: cfg.NodeHealthCheckTimeout,
 		},
+	}.Run(workerCtx)
+
+	go app.TrafficCollectorWorker{
+		Logger:        logger,
+		Nodes:         nodeRepo,
+		Accesses:      accessRepo,
+		Traffic:       trafficRepo,
+		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
+		PollInterval:  1 * time.Minute,
 	}.Run(workerCtx)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

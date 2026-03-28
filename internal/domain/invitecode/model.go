@@ -36,6 +36,7 @@ type Repository interface {
 	CreateActivation(ctx context.Context, in CreateActivationParams) (*Activation, error)
 	HasActivationByUser(ctx context.Context, inviteCodeID, userID string) (bool, error)
 	Create(ctx context.Context, in CreateParams) (*InviteCode, error)
+	ListRecent(ctx context.Context, limit int) ([]*InviteCode, error)
 }
 
 type CreateParams struct {

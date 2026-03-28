@@ -85,6 +85,17 @@ func (m *MockRuntime) Health(context.Context) error {
 	return nil
 }
 
+func (m *MockRuntime) ListPeerStats(context.Context) ([]PeerStat, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]PeerStat, 0, len(m.peers))
+	for _, p := range m.peers {
+		t := p.UpdatedAt
+		out = append(out, PeerStat{DeviceAccessID: p.DeviceAccessID, RXTotalBytes: 0, TXTotalBytes: 0, LastHandshakeAt: &t})
+	}
+	return out, nil
+}
+
 func (m *MockRuntime) PeerCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

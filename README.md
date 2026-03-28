@@ -235,6 +235,13 @@ PostgreSQL-реализации на `pgx` находятся в `internal/infra
 - Интеграции/репозитории — в `internal/infra`
 - HTTP/gRPC transport слой — в `internal/transport`
 
+## Deployment guides
+
+- `docs/deploy/backend-server.md` — базовый backend deploy
+- `docs/deploy/vpn-node.md` — deploy node-agent
+- `docs/deploy/single-server-full.md` — полный single-server цикл (все сервисы на одном сервере)
+- `deploy/env/all-in-one.env.example` — шаблон env-переменных без значений
+
 
 ### Admin/debug endpoints
 

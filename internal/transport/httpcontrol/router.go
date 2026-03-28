@@ -59,6 +59,7 @@ type Options struct {
 	Devices           DeviceAdminReader
 	InviteCodes       InviteCodeAdminRepo
 	AuditLogs         AuditLogger
+	TelegramWebhook   http.Handler
 }
 
 func NewRouter(opts Options) http.Handler {
@@ -114,6 +115,14 @@ func NewRouter(opts Options) http.Handler {
 		w.Header().Set("Content-Disposition", `attachment; filename="amneziawg.conf"`)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(cfg))
+	})
+
+	r.Post("/internal/telegram/webhook", func(w http.ResponseWriter, r *http.Request) {
+		if opts.TelegramWebhook == nil {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "telegram webhook is not configured"})
+			return
+		}
+		opts.TelegramWebhook.ServeHTTP(w, r)
 	})
 
 	r.Route("/admin", func(ar chi.Router) {
