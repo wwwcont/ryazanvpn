@@ -2,16 +2,19 @@ package nodeclient
 
 import (
 	"context"
+	"strings"
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
 )
 
 type AppAdapter struct {
 	Client *Client
+	Config Config
 }
 
 func (a AppAdapter) ApplyPeer(ctx context.Context, req app.NodeAgentOperationRequest) error {
-	return a.Client.ApplyPeer(ctx, OperationRequest{
+	cli := a.clientForBaseURL(req.AgentBaseURL)
+	return cli.ApplyPeer(ctx, OperationRequest{
 		OperationID:    req.OperationID,
 		DeviceAccessID: req.DeviceAccessID,
 		Protocol:       req.Protocol,
@@ -23,7 +26,8 @@ func (a AppAdapter) ApplyPeer(ctx context.Context, req app.NodeAgentOperationReq
 }
 
 func (a AppAdapter) RevokePeer(ctx context.Context, req app.NodeAgentOperationRequest) error {
-	return a.Client.RevokePeer(ctx, OperationRequest{
+	cli := a.clientForBaseURL(req.AgentBaseURL)
+	return cli.RevokePeer(ctx, OperationRequest{
 		OperationID:    req.OperationID,
 		DeviceAccessID: req.DeviceAccessID,
 		Protocol:       req.Protocol,
@@ -35,6 +39,9 @@ func (a AppAdapter) RevokePeer(ctx context.Context, req app.NodeAgentOperationRe
 }
 
 func (a AppAdapter) GetTrafficCounters(ctx context.Context) ([]app.NodeTrafficCounter, error) {
+	if a.Client == nil {
+		return nil, nil
+	}
 	items, err := a.Client.GetTrafficCounters(ctx)
 	if err != nil {
 		return nil, err
@@ -49,4 +56,17 @@ func (a AppAdapter) GetTrafficCounters(ctx context.Context) ([]app.NodeTrafficCo
 		})
 	}
 	return out, nil
+}
+
+func (a AppAdapter) clientForBaseURL(baseURL string) *Client {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" && a.Client != nil {
+		return a.Client
+	}
+	cfg := a.Config
+	cfg.BaseURL = baseURL
+	if cfg.BaseURL == "" && a.Client != nil {
+		return a.Client
+	}
+	return New(cfg)
 }

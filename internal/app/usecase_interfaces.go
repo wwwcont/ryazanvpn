@@ -62,6 +62,7 @@ type NodeTrafficClient interface {
 }
 
 type NodeAgentOperationRequest struct {
+	AgentBaseURL   string
 	OperationID    string
 	DeviceAccessID string
 	Protocol       string

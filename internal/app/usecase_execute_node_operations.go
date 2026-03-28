@@ -57,7 +57,14 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 		return err
 	}
 
+	nodeInfo, err := uc.Nodes.GetByID(ctx, op.VPNNodeID)
+	if err != nil {
+		_ = uc.Operations.MarkFailed(ctx, op.ID, now, err.Error())
+		return err
+	}
+
 	req := NodeAgentOperationRequest{
+		AgentBaseURL:   nodeInfo.AgentBaseURL,
 		OperationID:    op.ID,
 		DeviceAccessID: accessEntry.ID,
 		Protocol:       valueOrDefault(payload.Protocol, "wireguard"),
@@ -126,7 +133,14 @@ func (uc ExecuteRevokePeerOperation) Execute(ctx context.Context, operationID st
 		return err
 	}
 
+	nodeInfo, err := uc.Nodes.GetByID(ctx, op.VPNNodeID)
+	if err != nil {
+		_ = uc.Operations.MarkFailed(ctx, op.ID, now, err.Error())
+		return err
+	}
+
 	req := NodeAgentOperationRequest{
+		AgentBaseURL:   nodeInfo.AgentBaseURL,
 		OperationID:    op.ID,
 		DeviceAccessID: accessEntry.ID,
 		Protocol:       "wireguard",

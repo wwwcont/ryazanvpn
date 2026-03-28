@@ -13,8 +13,8 @@ type TrafficFactory struct {
 	MaxRetries int
 }
 
-func (f TrafficFactory) ForNode(endpoint string) app.NodeTrafficClient {
-	base := strings.TrimSpace(endpoint)
+func (f TrafficFactory) ForNode(agentBaseURL string) app.NodeTrafficClient {
+	base := strings.TrimSpace(agentBaseURL)
 	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 		base = "http://" + base
 	}

@@ -7,6 +7,5 @@ ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO vpn_nodes (name, region, endpoint, status)
 VALUES
-    ('mvp-node-1', 'eu-central', '10.0.0.1:51820', 'active'),
-    ('mvp-node-2', 'eu-west', '10.0.0.2:51820', 'active')
+    ('mvp-node-1', 'single-server', 'SERVER_IP:51820', 'active')
 ON CONFLICT (name) DO NOTHING;

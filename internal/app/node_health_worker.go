@@ -62,7 +62,7 @@ func (w NodeHealthWorker) poll(ctx context.Context, client *http.Client) {
 
 	now := time.Now().UTC()
 	for _, n := range nodes {
-		healthy := checkNodeHealth(ctx, client, n.Endpoint)
+		healthy := checkNodeHealth(ctx, client, n.AgentBaseURL)
 		targetStatus := node.StatusDown
 		if healthy {
 			targetStatus = node.StatusActive
@@ -80,12 +80,12 @@ func (w NodeHealthWorker) poll(ctx context.Context, client *http.Client) {
 	}
 }
 
-func checkNodeHealth(ctx context.Context, client *http.Client, endpoint string) bool {
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
+func checkNodeHealth(ctx context.Context, client *http.Client, agentBaseURL string) bool {
+	agentBaseURL = strings.TrimSpace(agentBaseURL)
+	if agentBaseURL == "" {
 		return false
 	}
-	healthURL := strings.TrimRight(endpoint, "/") + "/health"
+	healthURL := strings.TrimRight(agentBaseURL, "/") + "/health"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err != nil {
 		return false

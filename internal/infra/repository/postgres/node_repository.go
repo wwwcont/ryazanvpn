@@ -23,7 +23,7 @@ func (r *NodeRepository) WithTx(tx pgx.Tx) *NodeRepository {
 
 func (r *NodeRepository) ListAll(ctx context.Context) ([]*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, agent_base_url, vpn_endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 ORDER BY name`
 
@@ -50,7 +50,7 @@ ORDER BY name`
 
 func (r *NodeRepository) ListActive(ctx context.Context) ([]*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, agent_base_url, vpn_endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 WHERE status = 'active'
 ORDER BY name`
@@ -78,7 +78,7 @@ ORDER BY name`
 
 func (r *NodeRepository) GetByID(ctx context.Context, id string) (*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, agent_base_url, vpn_endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 WHERE id = $1`
 
@@ -131,7 +131,8 @@ func scanNode(row pgx.Row) (*node.Node, error) {
 		&out.ID,
 		&out.Name,
 		&out.Region,
-		&out.Endpoint,
+		&out.AgentBaseURL,
+		&out.VPNEndpoint,
 		&out.Status,
 		&out.CurrentLoad,
 		&out.UserCapacity,

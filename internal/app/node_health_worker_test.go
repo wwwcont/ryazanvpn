@@ -39,8 +39,8 @@ func TestNodeHealthWorker_Poll(t *testing.T) {
 	defer unhealthySrv.Close()
 
 	repo := &fakeNodeHealthRepo{nodes: []*node.Node{
-		{ID: "n1", Endpoint: healthySrv.URL, Status: node.StatusDown},
-		{ID: "n2", Endpoint: unhealthySrv.URL, Status: node.StatusActive},
+		{ID: "n1", AgentBaseURL: healthySrv.URL, Status: node.StatusDown},
+		{ID: "n2", AgentBaseURL: unhealthySrv.URL, Status: node.StatusActive},
 	}}
 
 	worker := NodeHealthWorker{Repo: repo, PollInterval: time.Hour}
