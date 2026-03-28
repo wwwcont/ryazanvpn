@@ -31,7 +31,7 @@ type ActivateInviteCodeInput struct {
 type ActivateInviteCodeRepos interface {
 	Users() UserRepository
 	InviteCodes() InviteCodeRepository
-	AccessGrants() AccessGrantRepository
+	AccessGrants() accessgrant.Repository
 	AuditLogs() AuditLogRepository
 }
 

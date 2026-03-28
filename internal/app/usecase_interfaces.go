@@ -57,14 +57,7 @@ type DeviceAccessRepository interface {
 	GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error)
 }
 
-type AccessGrantRepository interface {
-	Create(ctx context.Context, in accessgrant.CreateParams) (*accessgrant.AccessGrant, error)
-	GetActiveByUserID(ctx context.Context, userID string) (*accessgrant.AccessGrant, error)
-	GetLatestByUserID(ctx context.Context, userID string) (*accessgrant.AccessGrant, error)
-	ExpireActiveBefore(ctx context.Context, now time.Time) (int64, error)
-	ListActiveUsers(ctx context.Context, limit int) ([]*accessgrant.ActiveUserGrant, error)
-	RevokeActiveByUserID(ctx context.Context, userID string) (int64, error)
-}
+type AccessGrantRepository = accessgrant.Repository
 
 type NodeOperationRepository interface {
 	GetByID(ctx context.Context, id string) (*operation.NodeOperation, error)
