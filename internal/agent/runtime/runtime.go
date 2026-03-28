@@ -37,8 +37,24 @@ type OperationResult struct {
 	Idempotent  bool   `json:"idempotent"`
 }
 
-type VPNRuntime interface {
+type PeerStat struct {
+	DeviceAccessID  string     `json:"device_access_id"`
+	RXTotalBytes    int64      `json:"rx_total_bytes"`
+	TXTotalBytes    int64      `json:"tx_total_bytes"`
+	LastHandshakeAt *time.Time `json:"last_handshake_at,omitempty"`
+}
+
+type PeerManager interface {
 	ApplyPeer(ctx context.Context, req PeerOperationRequest) (OperationResult, error)
 	RevokePeer(ctx context.Context, req PeerOperationRequest) (OperationResult, error)
+}
+
+type PeerStatsReader interface {
+	ListPeerStats(ctx context.Context) ([]PeerStat, error)
+}
+
+type VPNRuntime interface {
+	PeerManager
+	PeerStatsReader
 	Health(ctx context.Context) error
 }

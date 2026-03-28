@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 )
 
 type NodeRepository struct {
@@ -23,7 +23,7 @@ func (r *NodeRepository) WithTx(tx pgx.Tx) *NodeRepository {
 
 func (r *NodeRepository) ListAll(ctx context.Context) ([]*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 ORDER BY name`
 
@@ -50,7 +50,7 @@ ORDER BY name`
 
 func (r *NodeRepository) ListActive(ctx context.Context) ([]*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 WHERE status = 'active'
 ORDER BY name`
@@ -78,7 +78,7 @@ ORDER BY name`
 
 func (r *NodeRepository) GetByID(ctx context.Context, id string) (*node.Node, error) {
 	const query = `
-SELECT id::text, name, region, endpoint, status, current_load, last_seen_at, created_at, updated_at
+SELECT id::text, name, region, endpoint, status, current_load, user_capacity, last_seen_at, created_at, updated_at
 FROM vpn_nodes
 WHERE id = $1`
 
@@ -134,6 +134,7 @@ func scanNode(row pgx.Row) (*node.Node, error) {
 		&out.Endpoint,
 		&out.Status,
 		&out.CurrentLoad,
+		&out.UserCapacity,
 		&lastSeen,
 		&out.CreatedAt,
 		&out.UpdatedAt,

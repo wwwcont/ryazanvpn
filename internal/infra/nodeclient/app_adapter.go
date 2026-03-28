@@ -33,3 +33,20 @@ func (a AppAdapter) RevokePeer(ctx context.Context, req app.NodeAgentOperationRe
 		EndpointMeta:   req.EndpointMeta,
 	})
 }
+
+func (a AppAdapter) GetTrafficCounters(ctx context.Context) ([]app.NodeTrafficCounter, error) {
+	items, err := a.Client.GetTrafficCounters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]app.NodeTrafficCounter, 0, len(items))
+	for _, it := range items {
+		out = append(out, app.NodeTrafficCounter{
+			DeviceAccessID:  it.DeviceAccessID,
+			RXTotalBytes:    it.RXTotalBytes,
+			TXTotalBytes:    it.TXTotalBytes,
+			LastHandshakeAt: it.LastHandshakeAt,
+		})
+	}
+	return out, nil
+}

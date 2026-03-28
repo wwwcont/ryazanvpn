@@ -3,9 +3,9 @@ package postgres
 import (
 	"context"
 
-	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
 type UserRepository struct {
@@ -63,6 +63,33 @@ WHERE telegram_id = $1`
 
 	var out user.User
 	err := r.q.QueryRow(ctx, query, telegramID).Scan(
+		&out.ID,
+		&out.TelegramID,
+		&out.Username,
+		&out.FirstName,
+		&out.LastName,
+		&out.Status,
+		&out.CreatedAt,
+		&out.UpdatedAt,
+	)
+	if isNoRows(err) {
+		return nil, user.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*user.User, error) {
+	const query = `
+SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at
+FROM users
+WHERE LOWER(username) = LOWER($1)
+LIMIT 1`
+
+	var out user.User
+	err := r.q.QueryRow(ctx, query, username).Scan(
 		&out.ID,
 		&out.TelegramID,
 		&out.Username,

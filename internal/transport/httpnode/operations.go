@@ -120,3 +120,22 @@ func respondOperationResult(w http.ResponseWriter, result runtime.OperationResul
 		"idempotent":   result.Idempotent,
 	})
 }
+
+func trafficCountersHandler(logger *slog.Logger, vpn runtime.VPNRuntime) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		items, err := vpn.ListPeerStats(r.Context())
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, runtime.ErrNotImplemented) {
+				status = http.StatusNotImplemented
+			}
+			respondError(w, status, err.Error())
+			return
+		}
+
+		logger.Info("traffic-counters processed", slog.Int("count", len(items)))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+	}
+}

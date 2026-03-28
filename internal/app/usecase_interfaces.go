@@ -5,17 +5,20 @@ import (
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/accessgrant"
 	"github.com/wwwcont/ryazanvpn/internal/domain/audit"
 	"github.com/wwwcont/ryazanvpn/internal/domain/device"
 	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 	"github.com/wwwcont/ryazanvpn/internal/domain/token"
+	"github.com/wwwcont/ryazanvpn/internal/domain/traffic"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
 type UserRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*user.User, error)
+	GetByUsername(ctx context.Context, username string) (*user.User, error)
 	Create(ctx context.Context, in user.CreateParams) (*user.User, error)
 	GetByID(ctx context.Context, id string) (*user.User, error)
 }
@@ -25,6 +28,8 @@ type InviteCodeRepository interface {
 	IncrementUsageAndMaybeExhaust(ctx context.Context, inviteCodeID string) (*invitecode.InviteCode, error)
 	CreateActivation(ctx context.Context, in invitecode.CreateActivationParams) (*invitecode.Activation, error)
 	HasActivationByUser(ctx context.Context, inviteCodeID, userID string) (bool, error)
+	Create(ctx context.Context, in invitecode.CreateParams) (*invitecode.InviteCode, error)
+	ListRecent(ctx context.Context, limit int) ([]*invitecode.InviteCode, error)
 }
 
 type NodeRepository interface {
@@ -52,6 +57,15 @@ type DeviceAccessRepository interface {
 	GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error)
 }
 
+type AccessGrantRepository interface {
+	Create(ctx context.Context, in accessgrant.CreateParams) (*accessgrant.AccessGrant, error)
+	GetActiveByUserID(ctx context.Context, userID string) (*accessgrant.AccessGrant, error)
+	GetLatestByUserID(ctx context.Context, userID string) (*accessgrant.AccessGrant, error)
+	ExpireActiveBefore(ctx context.Context, now time.Time) (int64, error)
+	ListActiveUsers(ctx context.Context, limit int) ([]*accessgrant.ActiveUserGrant, error)
+	RevokeActiveByUserID(ctx context.Context, userID string) (int64, error)
+}
+
 type NodeOperationRepository interface {
 	GetByID(ctx context.Context, id string) (*operation.NodeOperation, error)
 	Create(ctx context.Context, in operation.CreateParams) (*operation.NodeOperation, error)
@@ -68,6 +82,16 @@ type ConfigDownloadTokenRepository interface {
 	Create(ctx context.Context, in token.CreateParams) (*token.ConfigDownloadToken, error)
 	GetByTokenHash(ctx context.Context, tokenHash string) (*token.ConfigDownloadToken, error)
 	MarkUsed(ctx context.Context, id string, consumedAt time.Time) error
+}
+
+type TrafficRepository interface {
+	CreateSnapshot(ctx context.Context, in traffic.CreateSnapshotParams) (*traffic.DeviceTrafficSnapshot, error)
+	GetLastSnapshotByDeviceID(ctx context.Context, deviceID string, before time.Time) (*traffic.DeviceTrafficSnapshot, error)
+	AddDailyUsageDelta(ctx context.Context, in traffic.AddDailyUsageDeltaParams) error
+	GetDeviceTrafficTotal(ctx context.Context, deviceID string) (int64, error)
+	GetDeviceTrafficLastNDays(ctx context.Context, deviceID string, days int, now time.Time) (int64, error)
+	GetUserTrafficTotal(ctx context.Context, userID string) (int64, error)
+	GetUserTrafficLastNDays(ctx context.Context, userID string, days int, now time.Time) (int64, error)
 }
 
 type UnitOfWork interface {
@@ -91,6 +115,10 @@ type NodeAgentClient interface {
 	RevokePeer(ctx context.Context, req NodeAgentOperationRequest) error
 }
 
+type NodeTrafficClient interface {
+	GetTrafficCounters(ctx context.Context) ([]NodeTrafficCounter, error)
+}
+
 type NodeAgentOperationRequest struct {
 	OperationID    string
 	DeviceAccessID string
@@ -99,4 +127,11 @@ type NodeAgentOperationRequest struct {
 	AssignedIP     string
 	Keepalive      int
 	EndpointMeta   map[string]string
+}
+
+type NodeTrafficCounter struct {
+	DeviceAccessID  string
+	RXTotalBytes    int64
+	TXTotalBytes    int64
+	LastHandshakeAt *time.Time
 }

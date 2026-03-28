@@ -26,6 +26,10 @@ func (s stubRuntime) RevokePeer(context.Context, runtime.PeerOperationRequest) (
 	return runtime.OperationResult{}, nil
 }
 
+func (s stubRuntime) ListPeerStats(context.Context) ([]runtime.PeerStat, error) {
+	return nil, nil
+}
+
 func (s stubRuntime) Health(context.Context) error {
 	return s.healthErr
 }
