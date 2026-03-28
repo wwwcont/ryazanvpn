@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/example/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/app"
 )
 
 type AmneziaWGRenderer struct{}

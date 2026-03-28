@@ -3,7 +3,7 @@ package nodeclient
 import (
 	"context"
 
-	"github.com/example/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/app"
 )
 
 type AppAdapter struct {

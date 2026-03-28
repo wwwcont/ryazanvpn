@@ -3,7 +3,7 @@ package app
 import (
 	"errors"
 
-	"github.com/example/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 )
 
 var ErrNoActiveNodes = errors.New("no active nodes available")

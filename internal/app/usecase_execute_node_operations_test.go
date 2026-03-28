@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/access"
-	"github.com/example/ryazanvpn/internal/domain/node"
-	"github.com/example/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 )
 
 func TestExecuteCreatePeerOperation_Success(t *testing.T) {

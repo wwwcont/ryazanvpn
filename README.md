@@ -37,16 +37,19 @@ Production-minded каркас VPN platform MVP на Go с двумя серви
 
 ## Env-конфигурация
 
-Оба сервиса настраиваются только через env:
+Общие env-переменные:
 
 - `HTTP_ADDR` (пример: `:8080` / `:8081`)
+- `LOG_LEVEL` (`debug|info|warn|error`, default: `info`)
+- `SHUTDOWN_TIMEOUT` (default: `15s`)
+- `READINESS_TIMEOUT` (default: `2s`)
+
+Env для `control-plane`:
+
 - `POSTGRES_URL` (обязательный)
 - `REDIS_ADDR` (default: `redis:6379`)
 - `REDIS_PASSWORD` (optional)
 - `REDIS_DB` (default: `0`)
-- `LOG_LEVEL` (`debug|info|warn|error`, default: `info`)
-- `SHUTDOWN_TIMEOUT` (default: `15s`)
-- `READINESS_TIMEOUT` (default: `2s`)
 
 ## Локальный запуск
 
@@ -81,6 +84,14 @@ Env для node-agent:
 
 - `AGENT_HMAC_SECRET` (обязательный)
 - `AGENT_HMAC_MAX_SKEW` (default `5m`)
+- `RUNTIME_ADAPTER` (default `mock`)
+- `RUNTIME_WORK_DIR` (default `/var/lib/ryazanvpn/node-agent`)
+- `AWG_BINARY_PATH` (default `/usr/bin/awg`)
+- `WG_BINARY_PATH` (default `/usr/bin/wg`)
+- `IP_BINARY_PATH` (default `/usr/sbin/ip`)
+- `RUNTIME_EXEC_TIMEOUT` (default `10s`)
+
+`node-agent` не использует PostgreSQL/Redis в startup path и в endpoints `/health`, `/ready`, `/agent/v1/operations/*`.
 
 Payload для apply/revoke содержит:
 
@@ -162,7 +173,7 @@ make migrate-down
 Переопределить DSN можно переменной:
 
 ```bash
-POSTGRES_DSN='postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable' make migrate-up
+POSTGRES_URL='postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable' make migrate-up
 ```
 
 ## Проверки

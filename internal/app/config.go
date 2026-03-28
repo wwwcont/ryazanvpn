@@ -71,12 +71,21 @@ func LoadConfig(serviceName string) (Config, error) {
 		RuntimeExecTimeout:     durationFromEnv("RUNTIME_EXEC_TIMEOUT", 10*time.Second),
 	}
 
-	if cfg.PostgresURL == "" {
-		return Config{}, errors.New("POSTGRES_URL is required")
-	}
-
 	if cfg.HTTPAddr == "" {
 		return Config{}, errors.New("HTTP_ADDR must not be empty")
+	}
+
+	switch serviceName {
+	case "control-plane":
+		if cfg.PostgresURL == "" {
+			return Config{}, errors.New("POSTGRES_URL is required")
+		}
+	case "node-agent":
+		// node-agent routes do not depend on postgres/redis in startup path.
+	default:
+		if cfg.PostgresURL == "" {
+			return Config{}, errors.New("POSTGRES_URL is required")
+		}
 	}
 
 	return cfg, nil

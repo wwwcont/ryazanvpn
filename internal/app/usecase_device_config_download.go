@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/access"
-	"github.com/example/ryazanvpn/internal/domain/token"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 )
 
 type IssueDeviceConfigInput struct {

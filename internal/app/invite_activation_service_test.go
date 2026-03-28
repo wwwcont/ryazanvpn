@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/example/ryazanvpn/internal/domain/invitecode"
-	"github.com/example/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
 func TestInviteActivationService_ActivateByTelegramID_SuccessAndExhaust(t *testing.T) {

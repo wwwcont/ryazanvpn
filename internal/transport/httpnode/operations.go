@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/example/ryazanvpn/internal/agent/runtime"
+	"github.com/wwwcont/ryazanvpn/internal/agent/runtime"
 )
 
 type operationRequest struct {

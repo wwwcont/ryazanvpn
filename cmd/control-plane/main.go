@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/app"
-	"github.com/example/ryazanvpn/internal/infra/cache"
-	"github.com/example/ryazanvpn/internal/infra/crypto"
-	"github.com/example/ryazanvpn/internal/infra/db"
-	"github.com/example/ryazanvpn/internal/infra/logging"
-	pgrepo "github.com/example/ryazanvpn/internal/infra/repository/postgres"
-	"github.com/example/ryazanvpn/internal/transport/httpcontrol"
+	"github.com/wwwcont/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/infra/cache"
+	"github.com/wwwcont/ryazanvpn/internal/infra/crypto"
+	"github.com/wwwcont/ryazanvpn/internal/infra/db"
+	"github.com/wwwcont/ryazanvpn/internal/infra/logging"
+	pgrepo "github.com/wwwcont/ryazanvpn/internal/infra/repository/postgres"
+	"github.com/wwwcont/ryazanvpn/internal/transport/httpcontrol"
 )
 
 func main() {

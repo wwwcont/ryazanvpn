@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 
 MIGRATE ?= migrate
-POSTGRES_DSN ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
+POSTGRES_URL ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
+POSTGRES_DSN ?= $(POSTGRES_URL)
 
 .PHONY: run test lint migrate-up migrate-down
 

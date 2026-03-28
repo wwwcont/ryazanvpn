@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/agent/shell"
+	"github.com/wwwcont/ryazanvpn/internal/agent/shell"
 )
 
 type ShellRuntimeConfig struct {

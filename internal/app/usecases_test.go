@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/ryazanvpn/internal/domain/access"
-	"github.com/example/ryazanvpn/internal/domain/audit"
-	"github.com/example/ryazanvpn/internal/domain/device"
-	"github.com/example/ryazanvpn/internal/domain/invitecode"
-	"github.com/example/ryazanvpn/internal/domain/node"
-	"github.com/example/ryazanvpn/internal/domain/operation"
-	"github.com/example/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
+	"github.com/wwwcont/ryazanvpn/internal/domain/audit"
+	"github.com/wwwcont/ryazanvpn/internal/domain/device"
+	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
+	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
 func TestRegisterTelegramUser_CreateWhenMissing(t *testing.T) {

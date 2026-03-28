@@ -8,18 +8,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 
-	"github.com/example/ryazanvpn/internal/agent/runtime"
-	"github.com/example/ryazanvpn/internal/transport/httpcommon"
+	"github.com/wwwcont/ryazanvpn/internal/agent/runtime"
+	"github.com/wwwcont/ryazanvpn/internal/transport/httpcommon"
 	"log/slog"
 )
 
 type Options struct {
 	Logger           *slog.Logger
-	PG               *pgxpool.Pool
-	RedisClient      *redis.Client
 	ReadinessTimeout time.Duration
 	Runtime          runtime.VPNRuntime
 	HMACSecret       string
@@ -43,16 +39,6 @@ func NewRouter(opts Options) http.Handler {
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), opts.ReadinessTimeout)
 		defer cancel()
-
-		if err := opts.PG.Ping(ctx); err != nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "postgres"})
-			return
-		}
-
-		if err := opts.RedisClient.Ping(ctx).Err(); err != nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "redis"})
-			return
-		}
 
 		if err := opts.Runtime.Health(ctx); err != nil {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "runtime"})
