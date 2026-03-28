@@ -16,7 +16,7 @@ func TestTrafficCollectorWorker_CollectsDeltaAndHandlesReset(t *testing.T) {
 	trafficRepo := &tcTrafficRepo{}
 	factory := &tcFactory{counters: [][]NodeTrafficCounter{{{DeviceAccessID: "a1", RXTotalBytes: 100, TXTotalBytes: 50}}, {{DeviceAccessID: "a1", RXTotalBytes: 20, TXTotalBytes: 10}}}}
 	w := TrafficCollectorWorker{
-		Nodes:         &tcNodeRepo{nodes: []*node.Node{{ID: "n1", Endpoint: "http://n1", Status: node.StatusActive}}},
+		Nodes:         &tcNodeRepo{nodes: []*node.Node{{ID: "n1", AgentBaseURL: "http://n1", Status: node.StatusActive}}},
 		Accesses:      accessRepo,
 		Traffic:       trafficRepo,
 		ClientFactory: factory,
@@ -108,7 +108,7 @@ func (r *tcTrafficRepo) GetUserTrafficLastNDays(ctx context.Context, userID stri
 
 type tcFactory struct{ counters [][]NodeTrafficCounter }
 
-func (f *tcFactory) ForNode(endpoint string) NodeTrafficClient {
+func (f *tcFactory) ForNode(agentBaseURL string) NodeTrafficClient {
 	if len(f.counters) == 0 {
 		return tcClient{}
 	}

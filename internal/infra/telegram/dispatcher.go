@@ -36,6 +36,7 @@ const (
 	cbDeleteYes = "c:d:y"
 	cbDeleteNo  = "c:d:n"
 
+	cbAdminMenu   = "a:menu"
 	cbAdminSingle = "a:c1"
 	cbAdminBatch  = "a:cb"
 	cbAdminLast   = "a:last"
@@ -232,6 +233,11 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 
 func (s *TelegramService) handleAdminCallback(ctx context.Context, cb *CallbackQuery, chatID int64, u *user.User) bool {
 	switch cb.Data {
+	case cbAdminMenu:
+		_ = s.Bot.SendMessage(ctx, chatID, "Админка:", adminMenu())
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Открываю админку")
+		_ = s.logAudit(ctx, u.ID, "telegram.admin.menu.open", map[string]any{"chat_id": chatID})
+		return true
 	case cbAdminSingle:
 		s.createSingleCode(ctx, chatID, u.ID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Код создан")
@@ -243,10 +249,12 @@ func (s *TelegramService) handleAdminCallback(ctx context.Context, cb *CallbackQ
 		return true
 	case cbAdminLast:
 		s.adminLastCodes(ctx, chatID)
+		_ = s.logAudit(ctx, u.ID, "telegram.admin.codes.list_recent", nil)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю")
 		return true
 	case cbAdminUsers:
 		s.adminActiveUsers(ctx, chatID)
+		_ = s.logAudit(ctx, u.ID, "telegram.admin.users.list_active", nil)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю")
 		return true
 	case cbAdminStat:
@@ -261,6 +269,7 @@ func (s *TelegramService) handleAdminCallback(ctx context.Context, cb *CallbackQ
 		return true
 	case cbAdminNode:
 		s.adminNodeStatus(ctx, chatID)
+		_ = s.logAudit(ctx, u.ID, "telegram.admin.nodes.status", nil)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю")
 		return true
 	default:
@@ -279,7 +288,7 @@ func (s *TelegramService) ensureUser(ctx context.Context, from User, chatID int6
 }
 
 func (s *TelegramService) sendMainMenu(ctx context.Context, chatID int64, isAdmin bool) {
-	text := "Добро пожаловать в RyazanVPN!\n\nПреимущества:\n• быстрый VPN\n• ограниченное число пользователей на сервер\n• низкая загруженность\n• простой импорт конфига\n• личная поддержка"
+	text := "Добро пожаловать в RyazanVPN!\n\nПреимущества:\n• быстрый VPN\n• не более 40 пользователей на сервер\n• низкая загрузка\n• стабильность\n• личная выдача доступа\n• простой импорт конфига"
 	_ = s.Bot.SendMessage(ctx, chatID, text, mainMenu(isAdmin))
 	if isAdmin {
 		_ = s.Bot.SendMessage(ctx, chatID, "Админ-меню:", adminMenu())
@@ -598,7 +607,7 @@ func (s *TelegramService) findUser(ctx context.Context, token string) (*user.Use
 func mainMenu(isAdmin bool) *InlineKeyboardMarkup {
 	rows := [][]InlineKeyboardButton{{{Text: "Ввести код", Data: cbEnterCode}, {Text: "Мой доступ", Data: cbMyAccess}}, {{Text: "Получить конфиг", Data: cbConfig}}, {{Text: "Удалить устройство", Data: cbDelete}, {Text: "Помощь", Data: cbHelp}}}
 	if isAdmin {
-		rows = append(rows, []InlineKeyboardButton{{Text: "Админ-меню", Data: cbAdminLast}})
+		rows = append(rows, []InlineKeyboardButton{{Text: "Админка", Data: cbAdminMenu}})
 	}
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -607,8 +616,7 @@ func adminMenu() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
 		{{Text: "Создать 1 код", Data: cbAdminSingle}, {Text: "Создать пачку кодов", Data: cbAdminBatch}},
 		{{Text: "Последние коды", Data: cbAdminLast}, {Text: "Активные пользователи", Data: cbAdminUsers}},
-		{{Text: "Статистика по пользователю", Data: cbAdminStat}},
-		{{Text: "Отозвать доступ", Data: cbAdminRev}, {Text: "Статус ноды", Data: cbAdminNode}},
+		{{Text: "Статус нод", Data: cbAdminNode}},
 	}}
 }
 

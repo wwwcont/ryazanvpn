@@ -9,7 +9,7 @@ import (
 )
 
 type TrafficClientFactory interface {
-	ForNode(endpoint string) NodeTrafficClient
+	ForNode(agentBaseURL string) NodeTrafficClient
 }
 
 type TrafficCollectorWorker struct {
@@ -53,7 +53,7 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 	}
 
 	for _, n := range nodes {
-		cli := w.ClientFactory.ForNode(n.Endpoint)
+		cli := w.ClientFactory.ForNode(n.AgentBaseURL)
 		counters, err := cli.GetTrafficCounters(ctx)
 		if err != nil {
 			w.logErr("get traffic counters", err)

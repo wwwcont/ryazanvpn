@@ -54,12 +54,14 @@ func main() {
 	opRepo := pgrepo.NewNodeOperationRepository(pg)
 	trafficRepo := pgrepo.NewTrafficRepository(pg)
 
-	nodeHTTPClient := nodeclient.New(nodeclient.Config{
+	nodeClientCfg := nodeclient.Config{
 		BaseURL:    cfg.NodeAgentBaseURL,
 		Secret:     cfg.NodeAgentSecret,
 		Timeout:    cfg.NodeAgentTimeout,
 		MaxRetries: cfg.NodeAgentRetries,
-	})
+	}
+	nodeHTTPClient := nodeclient.New(nodeClientCfg)
+	nodeAppClient := nodeclient.AppAdapter{Client: nodeHTTPClient, Config: nodeClientCfg}
 
 	var downloadUC *app.DownloadDeviceConfigByToken
 	var telegramWebhookHandler http.Handler
@@ -101,7 +103,7 @@ func main() {
 						Operations: opRepo,
 						Accesses:   accessRepo,
 						Nodes:      nodeRepo,
-						NodeClient: nodeclient.AppAdapter{Client: nodeHTTPClient},
+						NodeClient: nodeAppClient,
 					},
 					ConfigIssuer: &app.IssueDeviceConfig{
 						Accesses:  accessRepo,
@@ -110,7 +112,7 @@ func main() {
 						Encryptor: encryptor,
 					},
 				},
-				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: auditRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeclient.AppAdapter{Client: nodeHTTPClient}}},
+				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: auditRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeAppClient}},
 				Users:           userRepo,
 				Devices:         deviceRepo,
 				Accesses:        accessRepo,

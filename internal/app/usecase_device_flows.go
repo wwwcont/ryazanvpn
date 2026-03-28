@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/access"
@@ -140,6 +143,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		return nil, fmt.Errorf("create audit log: %w", err)
 	}
 
+	vpnHost, vpnPort := splitEndpointHostPort(selectedNode.VPNEndpoint)
 	issuedToken := ""
 	if uc.ConfigIssuer != nil {
 		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
@@ -148,8 +152,8 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			ServerPublicKey:  uc.ServerPublicKey,
 			AssignedIP:       assignedIP,
 			DNS:              uc.DNS,
-			EndpointHost:     valueOrDefault(uc.EndpointHost, selectedNode.Endpoint),
-			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, 51820),
+			EndpointHost:     valueOrDefault(uc.EndpointHost, vpnHost),
+			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, vpnPort),
 			Keepalive:        valueOrDefaultInt(uc.Keepalive, 25),
 			TokenTTL:         uc.TokenTTL,
 		})
@@ -264,4 +268,26 @@ type ListUserDevices struct {
 
 func (uc ListUserDevices) Execute(ctx context.Context, in ListUserDevicesInput) ([]*device.Device, error) {
 	return uc.Devices.ListByUserID(ctx, in.UserID)
+}
+
+func splitEndpointHostPort(vpnEndpoint string) (string, int) {
+	vpnEndpoint = strings.TrimSpace(vpnEndpoint)
+	if vpnEndpoint == "" {
+		return "", 51820
+	}
+	host, portRaw, err := net.SplitHostPort(vpnEndpoint)
+	if err != nil {
+		if strings.Count(vpnEndpoint, ":") == 1 {
+			parts := strings.SplitN(vpnEndpoint, ":", 2)
+			host = parts[0]
+			portRaw = parts[1]
+		} else {
+			return vpnEndpoint, 51820
+		}
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil || port <= 0 {
+		port = 51820
+	}
+	return host, port
 }

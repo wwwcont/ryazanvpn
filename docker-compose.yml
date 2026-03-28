@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vpn -d vpn"]
+      test: ["CMD-SHELL", "pg_isready -U ryazan -d ryazanvpn"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -25,6 +25,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    command:
+      [
+        "-path",
+        "/migrations",
+        "-database",
+        "postgres://ryazan:password1234@postgres:5432/ryazanvpn?sslmode=disable",
+        "up",
+      ]
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   control-plane:
     build:
@@ -51,6 +68,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   node-agent:
     build:

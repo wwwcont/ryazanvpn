@@ -12,7 +12,8 @@ type Node struct {
 	ID           string
 	Name         string
 	Region       string
-	Endpoint     string
+	AgentBaseURL string
+	VPNEndpoint  string
 	Status       string
 	CurrentLoad  int
 	UserCapacity int
