@@ -15,9 +15,14 @@
 
 ## Ожидаемые бинарники/команды
 Для Docker adapter используются env:
-- `DOCKER_BINARY_PATH` (default `/usr/bin/docker`)
+- `DOCKER_BINARY_PATH` (default `docker`, резолвится через `$PATH`)
 - `AMNEZIA_CONTAINER_NAME` (пример: `amnezia-awg2`)
 - `AMNEZIA_INTERFACE_NAME` (пример: `awg0`)
+
+Если `node-agent` запущен в Docker, нужно пробросить в контейнер:
+- `- /var/run/docker.sock:/var/run/docker.sock`
+
+Docker daemon внутри контейнера не требуется: `node-agent` использует Docker CLI в контейнере и Docker socket хоста.
 
 ## Формат вывода для ListPeerStats
 Используется `docker exec <container> awg show all dump`.
@@ -38,7 +43,7 @@
 Node-agent:
 - `RUNTIME_ADAPTER=amnezia_docker`
 - `RUNTIME_WORK_DIR=/var/lib/ryazanvpn/node-agent`
-- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `DOCKER_BINARY_PATH=docker`
 - `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
 - `AMNEZIA_INTERFACE_NAME=awg0`
 - `RUNTIME_EXEC_TIMEOUT=10s`
