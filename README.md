@@ -1,305 +1,112 @@
-# ryazanvpn MVP monorepo
+# RyazanVPN — production-minded MVP monorepo
 
-Production-minded каркас VPN platform MVP на Go с двумя сервисами:
+Монорепозиторий с двумя сервисами:
+- `cmd/control-plane`
+- `cmd/node-agent`
 
-- `control-plane` (`cmd/control-plane`)
-- `node-agent` (`cmd/node-agent`)
+Архитектурные слои:
+- `internal/domain` — доменные модели и интерфейсы.
+- `internal/app` — use cases и workers.
+- `internal/infra` — postgres/redis/telegram/runtime adapters.
+- `internal/transport` — HTTP transport (control-plane и node-agent).
 
-> В репозитории намеренно отсутствует бизнес-логика. Реализованы wiring, инфраструктурный каркас, конфигурация, миграции и health/readiness endpoints.
+## Режимы запуска
 
-## Технологии
-
-- Go `1.24+`
-- HTTP router: `chi`
-- PostgreSQL client: `pgx/v5` (`pgxpool`)
-- Redis client: `go-redis/v9`
-- Structured logging: `log/slog` в JSON
-- Local orchestration: `docker compose`
-
-## Структура
-
-```text
-.
-├── cmd/
-│   ├── control-plane/
-│   └── node-agent/
-├── internal/
-│   ├── app/
-│   ├── domain/
-│   ├── infra/
-│   └── transport/
-├── migrations/
-├── docker-compose.yml
-├── Dockerfile
-├── Makefile
-└── README.md
-```
-
-## Env-конфигурация
-
-Общие env-переменные:
-
-- `HTTP_ADDR` (пример: `:8080` / `:8081`)
-- `LOG_LEVEL` (`debug|info|warn|error`, default: `info`)
-- `SHUTDOWN_TIMEOUT` (default: `15s`)
-- `READINESS_TIMEOUT` (default: `2s`)
-
-Env для `control-plane`:
-
-- `POSTGRES_URL` (обязательный)
-- `REDIS_ADDR` (default: `redis:6379`)
-- `REDIS_PASSWORD` (optional)
-- `REDIS_DB` (default: `0`)
-- `VPN_SUBNET_CIDR` (default: `10.8.1.0/24`)
-- `VPN_SERVER_PUBLIC_ENDPOINT` (пример: `193.29.224.182:41475`)
-- `VPN_SERVER_PUBLIC_KEY` (server public key)
-- `VPN_CLIENT_ALLOWED_IPS` (CSV, default: `0.0.0.0/0,::/0`)
-
-## Локальный запуск
-
-1. Поднять всю среду:
+### 1) Single-server
+Используйте `docker-compose.single.yml`:
+- `control-plane`
+- `postgres`
+- `redis`
+- `migrate`
+- `node-agent`
+- `caddy`
 
 ```bash
-make run
+make run-single
 ```
 
-2. Проверить health endpoints:
+### 2) Backend + multi-node
+Backend (`docker-compose.backend.yml`):
+- `control-plane`, `postgres`, `redis`, `migrate`, `caddy`
 
 ```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/ready
-curl http://localhost:8081/health
-curl http://localhost:8081/ready
+make run-backend
 ```
 
+Node (`docker-compose.node.yml`):
+- `node-agent`
 
-### Node-agent operations API
+```bash
+make run-node
+```
 
-Node-agent предоставляет endpoints:
+## Env файлы
 
-- `GET /health`
-- `GET /ready`
-- `POST /agent/v1/operations/apply-peer`
-- `POST /agent/v1/operations/revoke-peer`
+Шаблоны:
+- `deploy/env/single-server.env.example`
+- `deploy/env/backend.env.example`
+- `deploy/env/node.env.example`
 
-Операционные запросы защищены HMAC-подписью (headers `X-Agent-Timestamp`, `X-Agent-Signature`).
+Сгенерированные:
+- `.env.single.generated`
+- `.env.backend.generated`
+- `.env.node.generated`
 
-Env для node-agent:
+> ⚠️ `.env.single.generated` содержит чувствительные данные (секреты, ключи, токены) и **не должен попадать в публичный git**.
 
-- `AGENT_HMAC_SECRET` (обязательный)
-- `AGENT_HMAC_MAX_SKEW` (default `5m`)
-- `RUNTIME_ADAPTER` (default `mock`)
-- `RUNTIME_WORK_DIR` (default `/var/lib/ryazanvpn/node-agent`)
-- `AWG_BINARY_PATH` (default `/usr/bin/awg`)
-- `WG_BINARY_PATH` (default `/usr/bin/wg`)
-- `IP_BINARY_PATH` (default `/usr/sbin/ip`)
-- `RUNTIME_EXEC_TIMEOUT` (default `10s`)
-- `DOCKER_BINARY_PATH` (default `/usr/bin/docker`)
-- `AMNEZIA_CONTAINER_NAME` (default `amnezia-awg2`)
-- `AMNEZIA_INTERFACE_NAME` (default `awg0`)
+## Telegram flow
 
-`node-agent` не использует PostgreSQL/Redis в startup path и в endpoints `/health`, `/ready`, `/agent/v1/operations/*`.
+Поддерживается webhook flow:
+- `/start` и русскоязычное приветствие
+- user menu: Ввести код / Мой доступ / Получить конфиг / Удалить устройство / Помощь
+- admin menu (по `TELEGRAM_ADMIN_IDS`):
+  - Создать 1 код
+  - Создать пачку кодов
+  - Последние коды
+  - Активные пользователи
+  - Статус нод
+  - Статистика пользователя
+  - Отозвать доступ
 
-Payload для apply/revoke содержит:
+Invite code: 4 цифры, одноразовый, выдается админом, при активации создает grant на 30 дней.
 
-- `operation_id`
-- `device_access_id`
-- `protocol`
-- `peer_public_key`
-- `assigned_ip`
-- `keepalive`
-- `endpoint_metadata` (optional)
+## Amnezia runtime
 
+Режим `RUNTIME_ADAPTER=amnezia_docker` использует:
+- `AMNEZIA_CONTAINER_NAME`
+- `AMNEZIA_INTERFACE_NAME`
+- `DOCKER_BINARY_PATH`
 
-### Control-plane -> node-agent integration (MVP)
+Операции:
+- Health
+- ApplyPeer
+- RevokePeer
+- ListPeerStats (`awg show all dump` parser)
 
-В `internal/infra/nodeclient` добавлен HTTP client для вызова node-agent с:
+## Metrics API (под будущий сайт)
 
-- HMAC signing
-- timeout
-- retry logic
+- `GET /api/v1/metrics/overview`
+- `GET /api/v1/metrics/nodes`
+- `GET /api/v1/metrics/users/{id}`
 
-Env для control-plane:
+Latency/speed сейчас возвращаются как `null/not_available` (честный placeholder).
 
-- `NODE_AGENT_BASE_URL` (default `http://node-agent:8081`)
-- `NODE_AGENT_HMAC_SECRET`
-- `NODE_AGENT_TIMEOUT` (default `5s`)
-- `NODE_AGENT_RETRIES` (default `2`)
-
-Дополнительно для control-plane:
-
-- `ADMIN_API_SECRET` — секрет для admin/debug endpoints (обязателен для использования `/admin/*`)
-- `ADMIN_API_SECRET_HEADER` (default `X-Admin-Secret`)
-- `NODE_HEALTH_POLL_INTERVAL` (default `15s`)
-- `NODE_HEALTH_CHECK_TIMEOUT` (default `3s`)
-
-
-### Config download for AmneziaWG
-
-Control-plane поддерживает выдачу конфигов по токену:
-
-- `GET /download/config/{token}`
-
-Поведение:
-
-- токен ищется по `sha256(token)`
-- проверяются `expires_at` и `used_at`
-- при успехе отдается `.conf` как attachment
-- после успешной выдачи `used_at` заполняется
-
-Для шифрования `device_accesses.config_blob_encrypted` используется AES-GCM сервис.
-
-Env:
-
-- `CONFIG_MASTER_KEY` — base64 AES key (16/24/32 bytes)
-
-## Миграции
-
-Используется CLI `golang-migrate` (`migrate` должен быть установлен локально).
-
-
-Базовая схема MVP создаёт таблицы:
-
-- `users`
-- `invite_codes`
-- `invite_code_activations`
-- `vpn_nodes`
-- `devices`
-- `device_accesses`
-- `node_operations`
-- `config_download_tokens`
-- `audit_logs`
-
-Также применяется seed-миграция с invite codes `1111`, `2222`, `3333` и двумя активными VPN-нодами.
+## Миграции и проверки
 
 ```bash
 make migrate-up
 make migrate-down
-```
-
-Переопределить DSN можно переменной:
-
-```bash
-POSTGRES_URL='postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable' make migrate-up
-```
-
-## Проверки
-
-```bash
 make test
 make lint
+go build ./cmd/control-plane
+go build ./cmd/node-agent
 ```
 
-## Domain + Repository layer (MVP)
+## Runbooks
 
-Добавлены доменные модели и интерфейсы репозиториев:
-
-- `internal/domain/user`
-- `internal/domain/invitecode`
-- `internal/domain/device`
-- `internal/domain/access`
-- `internal/domain/node`
-- `internal/domain/audit`
-- `internal/domain/operation`
-- `internal/domain/token`
-
-PostgreSQL-реализации на `pgx` находятся в `internal/infra/repository/postgres`.
-
-Для invite-code usage flow добавлен транзакционный application service:
-
-- `internal/app/invite_activation_service.go`
-
-## Application use cases (MVP)
-
-В `internal/app` добавлены use cases:
-
-- `RegisterTelegramUser`
-- `ActivateInviteCode`
-- `CreateDeviceForUser`
-- `AssignNodeForDevice`
-- `CreateDeviceAccess`
-- `RevokeDeviceAccess`
-- `ListUserDevices`
-
-А также выделены интерфейсы для:
-
-- генерации ключей (`KeyGenerator`)
-- аллокации IP (`IPAllocator`)
-- выбора ноды (`NodeAssigner`)
-
-## Graceful shutdown
-
-Оба HTTP-сервера корректно обрабатывают `SIGINT/SIGTERM`:
-
-- прекращают принимать новые запросы;
-- завершают активные запросы в пределах `SHUTDOWN_TIMEOUT`;
-- закрывают инфраструктурные подключения.
-
-## Дальнейшее расширение
-
-- Добавлять доменные модели и правила в `internal/domain`
-- Сценарии use-case — в `internal/app`
-- Интеграции/репозитории — в `internal/infra`
-- HTTP/gRPC transport слой — в `internal/transport`
-
-## Deployment guides
-
-- `docs/deploy/backend-server.md` — базовый backend deploy
-- `docs/deploy/vpn-node.md` — deploy node-agent
-- `docs/deploy/single-server-full.md` — полный single-server цикл (все сервисы на одном сервере)
-- `deploy/env/all-in-one.env.example` — шаблон env-переменных без значений
-
-
-### Admin/debug endpoints
-
-Control-plane предоставляет минимальный эксплуатационный набор для администрирования:
-
-- `GET /admin/nodes`
-- `GET /admin/users`
-- `GET /admin/devices`
-- `POST /admin/invite-codes`
-- `POST /admin/invite-codes/{id}/revoke`
-
-Все `/admin/*` endpoints защищены секретом из env (`ADMIN_API_SECRET`) через header `ADMIN_API_SECRET_HEADER` (по умолчанию `X-Admin-Secret`).
-
-`POST /admin/invite-codes` создает новый invite code и пишет запись в `audit_logs`.
-`POST /admin/invite-codes/{id}/revoke` отзывает invite code и также пишет `audit_logs`.
-
-### Background worker: node health monitor
-
-Внутри control-plane запускается background worker, который периодически опрашивает `GET {node.endpoint}/health` для каждой ноды:
-
-- если endpoint недоступен или отвечает не-2xx, статус ноды переводится в `down`;
-- если endpoint снова отвечает 2xx, статус возвращается в `active`.
-
-
-### Node-agent runtime adapters (mock -> shell)
-
-По умолчанию node-agent запускается с `RUNTIME_ADAPTER=mock`, что безопасно для MVP и тестирования.
-
-Для подготовки к интеграции с реальным runtime:
-
-1. Установите `RUNTIME_ADAPTER=shell`.
-2. Задайте пути к бинарям и рабочей директории:
-   - `RUNTIME_WORK_DIR`
-   - `AWG_BINARY_PATH`
-   - `WG_BINARY_PATH`
-   - `IP_BINARY_PATH`
-   - `RUNTIME_EXEC_TIMEOUT`
-3. Убедитесь, что binaries существуют на диске (health-check shell runtime это проверяет).
-
-### AmneziaWG Docker runtime adapter
-
-Для реального runtime используйте:
-
-- `RUNTIME_ADAPTER=amnezia_docker`
-- `DOCKER_BINARY_PATH=/usr/bin/docker`
-- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
-- `AMNEZIA_INTERFACE_NAME=awg0`
-
-Вызовы runtime:
-- apply peer: `docker exec <container> awg set <iface> peer ...`
-- revoke peer: `docker exec <container> awg set <iface> peer <pub> remove`
-- stats: `docker exec <container> awg show all dump`
-
-Важно: в текущем MVP shell adapter содержит только шаблонную безопасную реализацию с TODO и structured logs; команды управления VPN peers (apply/revoke) намеренно не реализованы до финализации и валидации production runbook.
+- `docs/runbooks/single-server-deploy.md`
+- `docs/runbooks/backend-deploy.md`
+- `docs/runbooks/node-deploy.md`
+- `docs/runbooks/rotate-telegram-token.md`
+- `docs/runbooks/rotate-node-agent-hmac.md`
+- `docs/runbooks/add-new-node.md`

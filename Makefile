@@ -4,10 +4,16 @@ MIGRATE ?= migrate
 POSTGRES_URL ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
 POSTGRES_DSN ?= $(POSTGRES_URL)
 
-.PHONY: run test lint migrate-up migrate-down
+.PHONY: run-single run-backend run-node test lint migrate-up migrate-down
 
-run:
-	docker compose up --build
+run-single:
+	docker compose --env-file .env.single.generated -f docker-compose.single.yml up --build
+
+run-backend:
+	docker compose --env-file .env.backend.generated -f docker-compose.backend.yml up --build
+
+run-node:
+	docker compose --env-file .env.node.generated -f docker-compose.node.yml up --build
 
 test:
 	go test ./...

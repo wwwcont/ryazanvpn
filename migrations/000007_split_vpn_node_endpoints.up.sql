@@ -25,7 +25,7 @@ DELETE FROM vpn_nodes WHERE name <> 'mvp-node-1';
 UPDATE vpn_nodes
 SET region = 'single-server',
     agent_base_url = 'http://node-agent:8081',
-    vpn_endpoint = 'SERVER_IP:51820',
+    vpn_endpoint = '193.29.224.182:41475',
     status = 'active'
 WHERE name = 'mvp-node-1';
 

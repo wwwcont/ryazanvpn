@@ -616,7 +616,8 @@ func adminMenu() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
 		{{Text: "Создать 1 код", Data: cbAdminSingle}, {Text: "Создать пачку кодов", Data: cbAdminBatch}},
 		{{Text: "Последние коды", Data: cbAdminLast}, {Text: "Активные пользователи", Data: cbAdminUsers}},
-		{{Text: "Статус нод", Data: cbAdminNode}},
+		{{Text: "Статус нод", Data: cbAdminNode}, {Text: "Статистика пользователя", Data: cbAdminStat}},
+		{{Text: "Отозвать доступ", Data: cbAdminRev}},
 	}}
 }
 
@@ -626,7 +627,7 @@ func (s *TelegramService) issueDownloadToken(ctx context.Context, accessID strin
 		return "", err
 	}
 	if len(acc.ConfigBlobEncrypted) == 0 {
-		return "", fmt.Errorf("config not ready")
+		return "", fmt.Errorf("config not ready for access_id=%s: encrypted blob is empty", accessID)
 	}
 	if s.TokenTTL <= 0 {
 		s.TokenTTL = 15 * time.Minute

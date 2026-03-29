@@ -163,12 +163,19 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 
 	endpoint := valueOrDefault(uc.PublicEndpoint, selectedNode.VPNEndpoint)
 	vpnHost, vpnPort := splitEndpointHostPort(endpoint)
+	if selectedNode.VPNEndpointHost != "" {
+		vpnHost = selectedNode.VPNEndpointHost
+	}
+	if selectedNode.VPNEndpointPort > 0 {
+		vpnPort = selectedNode.VPNEndpointPort
+	}
+	serverPublicKey := valueOrDefault(uc.ServerPublicKey, selectedNode.ServerPublicKey)
 	issuedToken := ""
 	if uc.ConfigIssuer != nil {
 		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
 			DeviceAccessID:   createdAccess.ID,
 			DevicePrivateKey: privateKey,
-			ServerPublicKey:  uc.ServerPublicKey,
+			ServerPublicKey:  serverPublicKey,
 			PresharedKey:     presharedKey,
 			AssignedIP:       assignedIP,
 			DNS:              uc.DNS,
