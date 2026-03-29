@@ -47,6 +47,22 @@ type Config struct {
 	VPNServerPublicEndpoint string
 	VPNServerPublicKey      string
 	VPNClientAllowedIPs     []string
+	VPNAWGJc                int
+	VPNAWGJmin              int
+	VPNAWGJmax              int
+	VPNAWGS1                int
+	VPNAWGS2                int
+	VPNAWGS3                int
+	VPNAWGS4                int
+	VPNAWGH1                int
+	VPNAWGH2                int
+	VPNAWGH3                int
+	VPNAWGH4                int
+	VPNAWGI1                int
+	VPNAWGI2                int
+	VPNAWGI3                int
+	VPNAWGI4                int
+	VPNAWGI5                int
 	TelegramBotToken        string
 	TelegramWebhookSecret   string
 	PublicBaseURL           string
@@ -93,6 +109,22 @@ func LoadConfig(serviceName string) (Config, error) {
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
 		VPNServerPublicKey:      envOrDefault("VPN_SERVER_PUBLIC_KEY", ""),
 		VPNClientAllowedIPs:     csvListFromEnvOrDefault("VPN_CLIENT_ALLOWED_IPS", []string{"0.0.0.0/0", "::/0"}),
+		VPNAWGJc:                intFromEnv("VPN_AWG_JC", 3),
+		VPNAWGJmin:              intFromEnv("VPN_AWG_JMIN", 50),
+		VPNAWGJmax:              intFromEnv("VPN_AWG_JMAX", 1000),
+		VPNAWGS1:                intFromEnv("VPN_AWG_S1", 15),
+		VPNAWGS2:                intFromEnv("VPN_AWG_S2", 77),
+		VPNAWGS3:                intFromEnv("VPN_AWG_S3", 19),
+		VPNAWGS4:                intFromEnv("VPN_AWG_S4", 22),
+		VPNAWGH1:                intFromEnv("VPN_AWG_H1", 1),
+		VPNAWGH2:                intFromEnv("VPN_AWG_H2", 2),
+		VPNAWGH3:                intFromEnv("VPN_AWG_H3", 3),
+		VPNAWGH4:                intFromEnv("VPN_AWG_H4", 4),
+		VPNAWGI1:                intFromEnv("VPN_AWG_I1", 7),
+		VPNAWGI2:                intFromEnv("VPN_AWG_I2", 8),
+		VPNAWGI3:                intFromEnv("VPN_AWG_I3", 9),
+		VPNAWGI4:                intFromEnv("VPN_AWG_I4", 10),
+		VPNAWGI5:                intFromEnv("VPN_AWG_I5", 11),
 		TelegramBotToken:        os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramWebhookSecret:   os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		PublicBaseURL:           envOrDefault("PUBLIC_BASE_URL", "http://localhost:8080"),

@@ -41,6 +41,7 @@ const (
 	cbCfgFile   = "c:f"
 	cbCfgQR     = "c:q"
 	cbCfgText   = "c:t"
+	cbCfgDefVPN = "c:dv"
 
 	cbAdminMenu   = "a:menu"
 	cbAdminSingle = "a:c1"
@@ -98,6 +99,8 @@ type TelegramService struct {
 	AdminIDs        map[int64]struct{}
 	NodeCapacity    int
 	ConfigEncryptor app.EncryptionService
+	VPNExporter     app.VPNKeyExporter
+	DefaultVPNAWG   app.DefaultVPNAWGFields
 }
 
 func (s *TelegramService) HandleUpdate(ctx context.Context, upd Update) {
@@ -242,6 +245,9 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 	case cbCfgText:
 		s.sendConfigText(ctx, chatID, u.ID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю текст")
+	case cbCfgDefVPN:
+		s.sendDefaultVPNKey(ctx, chatID, u.ID)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Готовлю ключ")
 	default:
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Неизвестное действие")
 	}
@@ -635,6 +641,7 @@ func configReadyMenu() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
 		{{Text: "Скачать .conf", Data: cbCfgFile}},
 		{{Text: "Показать QR", Data: cbCfgQR}, {Text: "Показать текст", Data: cbCfgText}},
+		{{Text: "Ключ для DefaultVPN", Data: cbCfgDefVPN}},
 	}}
 }
 
@@ -752,6 +759,45 @@ func (s *TelegramService) sendConfigText(ctx context.Context, chatID int64, user
 	}
 	_ = s.Bot.SendMessage(ctx, chatID, "Текстовый fallback (лучше использовать файл .conf):\n```\n"+configPlain+"\n```", configReadyMenu())
 	s.logInfo("telegram.delivery.text", "user_id", userID, "access_id", accessID, "chat_id", chatID)
+}
+
+func (s *TelegramService) sendDefaultVPNKey(ctx context.Context, chatID int64, userID string) {
+	if s.VPNExporter == nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Экспорт ключа пока недоступен.", configReadyMenu())
+		return
+	}
+	accessID, err := s.resolveActiveAccessID(ctx, userID)
+	if err != nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Нет активного доступа для генерации ключа.", configReadyMenu())
+		return
+	}
+	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
+	if err != nil {
+		s.logErr("load config plaintext for defaultvpn", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Конфиг ещё не готов.", configReadyMenu())
+		return
+	}
+
+	d, err := s.Devices.GetActiveByUserID(ctx, userID)
+	if err != nil {
+		s.logErr("load device for defaultvpn", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось получить данные устройства.", configReadyMenu())
+		return
+	}
+
+	key, err := s.VPNExporter.ExportDefaultVPN(ctx, app.ExportVPNKeyInput{
+		Config:          configPlain,
+		Description:     "RyazanVPN",
+		ClientPublicKey: d.PublicKey,
+		AWG:             s.DefaultVPNAWG,
+	})
+	if err != nil {
+		s.logErr("export defaultvpn key", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось сформировать DefaultVPN ключ.", configReadyMenu())
+		return
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, "Ключ для DefaultVPN:\n`"+key+"`", configReadyMenu())
+	s.logInfo("telegram.delivery.defaultvpn", "user_id", userID, "access_id", accessID, "chat_id", chatID)
 }
 
 func (s *TelegramService) resolveActiveAccessID(ctx context.Context, userID string) (string, error) {
