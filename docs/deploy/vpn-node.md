@@ -14,11 +14,11 @@ Create `/etc/ryazanvpn/node-agent.env`:
 HTTP_ADDR=:8081
 LOG_LEVEL=info
 AGENT_HMAC_SECRET=change-me
-RUNTIME_ADAPTER=mock
+RUNTIME_ADAPTER=amnezia_docker
 RUNTIME_WORK_DIR=/var/lib/ryazanvpn/node-agent
-AWG_BINARY_PATH=/usr/bin/awg
-WG_BINARY_PATH=/usr/bin/wg
-IP_BINARY_PATH=/usr/sbin/ip
+DOCKER_BINARY_PATH=/usr/bin/docker
+AMNEZIA_CONTAINER_NAME=amnezia-awg2
+AMNEZIA_INTERFACE_NAME=awg0
 RUNTIME_EXEC_TIMEOUT=10s
 ```
 
@@ -44,3 +44,4 @@ curl -sS http://127.0.0.1:8081/ready
 - `RUNTIME_ADAPTER=mock` — default безопасный режим для MVP.
 - `RUNTIME_ADAPTER=shell` — подготовленный шаблон shell-runtime adapter.
   - apply/revoke команды **намеренно не реализованы** (TODO) до появления проверенных командных последовательностей управления AWG/WG.
+- `RUNTIME_ADAPTER=amnezia_docker` — production adapter для контейнера AmneziaWG через `docker exec`.

@@ -2,19 +2,22 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 )
 
 type createPeerPayload struct {
-	DeviceID   string `json:"device_id"`
-	AccessID   string `json:"access_id"`
-	PublicKey  string `json:"public_key"`
-	AssignedIP string `json:"assigned_ip"`
-	Protocol   string `json:"protocol"`
-	Keepalive  int    `json:"keepalive"`
+	DeviceID     string `json:"device_id"`
+	AccessID     string `json:"access_id"`
+	PublicKey    string `json:"public_key"`
+	AssignedIP   string `json:"assigned_ip"`
+	Protocol     string `json:"protocol"`
+	Keepalive    int    `json:"keepalive"`
+	PresharedKey string `json:"preshared_key,omitempty"`
 }
 
 type revokePeerPayload struct {
@@ -23,11 +26,12 @@ type revokePeerPayload struct {
 }
 
 type ExecuteCreatePeerOperation struct {
-	Operations NodeOperationRepository
-	Accesses   DeviceAccessRepository
-	Nodes      NodeRepository
-	NodeClient NodeAgentClient
-	Now        func() time.Time
+	Operations         NodeOperationRepository
+	Accesses           DeviceAccessRepository
+	Nodes              NodeRepository
+	NodeClient         NodeAgentClient
+	SensitiveEncryptor EncryptionService
+	Now                func() time.Time
 }
 
 func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID string) error {
@@ -71,6 +75,10 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 		PeerPublicKey:  payload.PublicKey,
 		AssignedIP:     payload.AssignedIP,
 		Keepalive:      valueOrDefaultInt(payload.Keepalive, 25),
+		EndpointMeta:   map[string]string{},
+	}
+	if psk, err := uc.resolvePresharedKey(payload.PresharedKey); err == nil && psk != "" {
+		req.EndpointMeta["preshared_key"] = psk
 	}
 
 	if err := uc.NodeClient.ApplyPeer(ctx, req); err != nil {
@@ -90,6 +98,29 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 	}
 
 	return nil
+}
+
+func (uc ExecuteCreatePeerOperation) resolvePresharedKey(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	const prefix = "enc:v1:"
+	if !strings.HasPrefix(raw, prefix) {
+		return raw, nil
+	}
+	if uc.SensitiveEncryptor == nil {
+		return "", nil
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(raw, prefix))
+	if err != nil {
+		return "", err
+	}
+	plain, err := uc.SensitiveEncryptor.Decrypt(ciphertext)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 func (uc ExecuteCreatePeerOperation) updateNodeLoadDelta(ctx context.Context, nodeID string, delta int) error {

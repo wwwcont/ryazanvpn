@@ -1,7 +1,7 @@
-# AmneziaWG runtime integration (safe scaffold)
+# AmneziaWG runtime integration
 
 ## Цель
-Этот каркас подготавливает `node-agent` к безопасной интеграции с реальным AmneziaWG/WireGuard runtime без выполнения сомнительных shell-команд.
+`node-agent` поддерживает runtime adapter `RUNTIME_ADAPTER=amnezia_docker` для управления AmneziaWG внутри Docker-контейнера.
 
 ## Runtime interfaces
 В `internal/agent/runtime` выделены интерфейсы:
@@ -14,43 +14,31 @@
 `VPNRuntime` объединяет их + `Health(ctx)`.
 
 ## Ожидаемые бинарники/команды
-Для shell adapter (`RUNTIME_ADAPTER=shell`) используются пути из env:
-- `AWG_BINARY_PATH`
-- `WG_BINARY_PATH`
-- `IP_BINARY_PATH`
-
-Для чтения peer stats (traffic counters) используется отдельная read-only команда:
-- `RUNTIME_STATS_BINARY_PATH`
-- `RUNTIME_STATS_ARGS` (CSV)
-
-Пример:
-- `RUNTIME_STATS_BINARY_PATH=/usr/bin/awg`
-- `RUNTIME_STATS_ARGS=show,peer-stats,machine`
-
-> Важно: adapter валидирует аргументы по allowlist regexp и не исполняет невалидные токены.
+Для Docker adapter используются env:
+- `DOCKER_BINARY_PATH` (default `/usr/bin/docker`)
+- `AMNEZIA_CONTAINER_NAME` (пример: `amnezia-awg2`)
+- `AMNEZIA_INTERFACE_NAME` (пример: `awg0`)
 
 ## Формат вывода для ListPeerStats
-Shell scaffold ожидает строки формата:
-
-`<device_access_id> <rx_total_bytes> <tx_total_bytes> [last_handshake_unix|-]`
-
-Пример:
-
-`da_abc123 1024 2048 1711600000`
+Используется `docker exec <container> awg show all dump`.
+Парсятся peer-строки формата wireguard dump:
+- public key
+- preshared key
+- endpoint
+- allowed ips
+- latest handshake unix timestamp
+- rx bytes
+- tx bytes
+- persistent keepalive
 
 ## Маппинг peer -> device_access
-Для корректного учёта трафика runtime обязан возвращать `device_access_id` напрямую в stats output.
-Это ключевой идентификатор для записи snapshots/агрегации в control-plane.
+Трафик в control-plane сначала маппится по `device_access_id` (если runtime уже знает связь `peer_public_key -> device_access_id`), а затем fallback по `allowed_ip` + `vpn_node_id`.
 
 ## Включение через env
 Node-agent:
-- `RUNTIME_ADAPTER=shell`
+- `RUNTIME_ADAPTER=amnezia_docker`
 - `RUNTIME_WORK_DIR=/var/lib/ryazanvpn/node-agent`
-- `AWG_BINARY_PATH=/usr/bin/awg`
-- `WG_BINARY_PATH=/usr/bin/wg`
-- `IP_BINARY_PATH=/usr/sbin/ip`
+- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
+- `AMNEZIA_INTERFACE_NAME=awg0`
 - `RUNTIME_EXEC_TIMEOUT=10s`
-- `RUNTIME_STATS_BINARY_PATH=/usr/bin/awg`
-- `RUNTIME_STATS_ARGS=show,peer-stats,machine`
-
-Если `RUNTIME_STATS_BINARY_PATH`/`RUNTIME_STATS_ARGS` не заданы, `ListPeerStats` возвращает `ErrNotImplemented` (без unsafe fallback).

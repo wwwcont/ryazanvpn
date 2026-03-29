@@ -50,6 +50,10 @@ func (a AppAdapter) GetTrafficCounters(ctx context.Context) ([]app.NodeTrafficCo
 	for _, it := range items {
 		out = append(out, app.NodeTrafficCounter{
 			DeviceAccessID:  it.DeviceAccessID,
+			PeerPublicKey:   it.PeerPublicKey,
+			AllowedIP:       it.AllowedIP,
+			Endpoint:        it.Endpoint,
+			PresharedKey:    it.PresharedKey,
 			RXTotalBytes:    it.RXTotalBytes,
 			TXTotalBytes:    it.TXTotalBytes,
 			LastHandshakeAt: it.LastHandshakeAt,

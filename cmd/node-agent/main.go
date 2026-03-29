@@ -105,6 +105,22 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		}
 		return rt, nil
 	}
+	if adapter == "amnezia_docker" {
+		logger.Info("runtime adapter selected", slog.String("adapter", "amnezia_docker"))
+		rt := runtime.NewAmneziaDockerRuntime(logger, runtime.AmneziaDockerRuntimeConfig{
+			WorkDir:          cfg.RuntimeWorkDir,
+			DockerBinaryPath: cfg.DockerBinaryPath,
+			ContainerName:    cfg.AmneziaContainerName,
+			InterfaceName:    cfg.AmneziaInterfaceName,
+			CommandTimeout:   cfg.RuntimeExecTimeout,
+		}, shell.NewOSExecutor(logger))
+		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
+		defer cancel()
+		if err := rt.Health(healthCtx); err != nil {
+			return nil, err
+		}
+		return rt, nil
+	}
 	if adapter == "mock" || adapter == "" {
 		logger.Info("runtime adapter selected", slog.String("adapter", "mock"))
 		return runtime.NewMockRuntime(logger), nil

@@ -60,9 +60,9 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 			continue
 		}
 		for _, c := range counters {
-			acc, err := w.Accesses.GetByID(ctx, c.DeviceAccessID)
+			acc, err := w.resolveAccess(ctx, n.ID, c)
 			if err != nil {
-				w.logErr("get access by id", err)
+				w.logErr("resolve access", err)
 				continue
 			}
 			prev, err := w.Traffic.GetLastSnapshotByDeviceID(ctx, acc.DeviceID, now)
@@ -92,6 +92,24 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string, c NodeTrafficCounter) (*trafficAccess, error) {
+	acc, err := w.Accesses.GetByID(ctx, c.DeviceAccessID)
+	if err == nil && acc != nil {
+		return &trafficAccess{DeviceID: acc.DeviceID}, nil
+	}
+	if c.AllowedIP != "" {
+		accByIP, ipErr := w.Accesses.GetActiveByNodeAndAssignedIP(ctx, nodeID, c.AllowedIP)
+		if ipErr == nil && accByIP != nil {
+			return &trafficAccess{DeviceID: accByIP.DeviceID}, nil
+		}
+	}
+	return nil, err
+}
+
+type trafficAccess struct {
+	DeviceID string
 }
 
 func (w TrafficCollectorWorker) logErr(msg string, err error) {

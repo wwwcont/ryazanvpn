@@ -48,7 +48,8 @@ func (r *tcNodeRepo) UpdateHealth(ctx context.Context, id string, status string,
 func (r *tcNodeRepo) UpdateLoad(ctx context.Context, id string, currentLoad int) error { return nil }
 
 type tcAccessRepo struct {
-	entries map[string]*access.DeviceAccess
+	entries  map[string]*access.DeviceAccess
+	byNodeIP map[string]*access.DeviceAccess
 }
 
 func (r *tcAccessRepo) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
@@ -69,6 +70,16 @@ func (r *tcAccessRepo) SetConfigBlobEncrypted(ctx context.Context, id string, bl
 }
 func (r *tcAccessRepo) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
+}
+func (r *tcAccessRepo) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	if r.byNodeIP == nil {
+		return nil, access.ErrNotFound
+	}
+	item, ok := r.byNodeIP[nodeID+"|"+assignedIP]
+	if !ok {
+		return nil, access.ErrNotFound
+	}
+	return item, nil
 }
 
 type tcTrafficRepo struct {

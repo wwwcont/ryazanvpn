@@ -33,6 +33,10 @@ type Config struct {
 
 type TrafficCounter struct {
 	DeviceAccessID  string     `json:"device_access_id"`
+	PeerPublicKey   string     `json:"peer_public_key,omitempty"`
+	AllowedIP       string     `json:"allowed_ip,omitempty"`
+	Endpoint        string     `json:"endpoint,omitempty"`
+	PresharedKey    string     `json:"preshared_key,omitempty"`
 	RXTotalBytes    int64      `json:"rx_total_bytes"`
 	TXTotalBytes    int64      `json:"tx_total_bytes"`
 	LastHandshakeAt *time.Time `json:"last_handshake_at,omitempty"`

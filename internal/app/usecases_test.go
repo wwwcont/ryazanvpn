@@ -106,14 +106,15 @@ func TestCreateDeviceForUser_AssignsMinLoadNode(t *testing.T) {
 	auditRepo := &fakeAudit{}
 
 	uc := CreateDeviceForUser{
-		Devices:      devRepo,
-		Nodes:        nodes,
-		Accesses:     accessRepo,
-		Operations:   opRepo,
-		AuditLogs:    auditRepo,
-		KeyGenerator: fakeKeys{},
-		IPAllocator:  fakeIPAlloc{ip: "10.10.0.2"},
-		NodeAssigner: MinLoadNodeAssigner{},
+		Devices:       devRepo,
+		Nodes:         nodes,
+		Accesses:      accessRepo,
+		Operations:    opRepo,
+		AuditLogs:     auditRepo,
+		KeyGenerator:  fakeKeys{},
+		PresharedKeys: fakeKeys{},
+		IPAllocator:   fakeIPAlloc{ip: "10.10.0.2"},
+		NodeAssigner:  MinLoadNodeAssigner{},
 	}
 
 	out, err := uc.Execute(context.Background(), CreateDeviceForUserInput{UserID: "u1", Name: "iphone"})
@@ -356,6 +357,9 @@ func (f *fakeAccess) SetConfigBlobEncrypted(ctx context.Context, id string, blob
 func (f *fakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
 }
+func (f *fakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
 
 type fakeOps struct{ created *operation.NodeOperation }
 
@@ -389,6 +393,7 @@ type fakeKeys struct{}
 func (fakeKeys) Generate(ctx context.Context) (string, string, error) {
 	return "pub", "priv", nil
 }
+func (fakeKeys) GeneratePresharedKey(ctx context.Context) (string, error) { return "psk", nil }
 
 type fakeIPAlloc struct{ ip string }
 
