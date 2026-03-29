@@ -20,11 +20,13 @@ type IssueDeviceConfigInput struct {
 	ServerPublicKey  string
 	PresharedKey     string
 	AssignedIP       string
+	MTU              int
 	DNS              []string
 	EndpointHost     string
 	EndpointPort     int
 	Keepalive        int
 	AllowedIPs       []string
+	AWG              DefaultVPNAWGFields
 	TokenTTL         time.Duration
 }
 
@@ -60,11 +62,13 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		ServerPublicKey:  in.ServerPublicKey,
 		PresharedKey:     in.PresharedKey,
 		AssignedIP:       in.AssignedIP,
+		MTU:              in.MTU,
 		DNS:              in.DNS,
 		EndpointHost:     in.EndpointHost,
 		EndpointPort:     in.EndpointPort,
 		Keepalive:        in.Keepalive,
 		AllowedIPs:       in.AllowedIPs,
+		AWG:              in.AWG,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "missing required fields") {

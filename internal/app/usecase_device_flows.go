@@ -54,6 +54,8 @@ type CreateDeviceForUser struct {
 	DNS                []string
 	ClientAllowedIPs   []string
 	Keepalive          int
+	MTU                int
+	DefaultVPNAWG      DefaultVPNAWGFields
 	TokenTTL           time.Duration
 	SensitiveEncryptor EncryptionService
 }
@@ -181,11 +183,13 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			ServerPublicKey:  serverPublicKey,
 			PresharedKey:     presharedKey,
 			AssignedIP:       assignedIP,
+			MTU:              uc.MTU,
 			DNS:              uc.DNS,
 			EndpointHost:     valueOrDefault(uc.EndpointHost, vpnHost),
 			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, vpnPort),
 			Keepalive:        valueOrDefaultInt(uc.Keepalive, 25),
 			AllowedIPs:       uc.ClientAllowedIPs,
+			AWG:              uc.DefaultVPNAWG,
 			TokenTTL:         uc.TokenTTL,
 		})
 		if err != nil {
