@@ -69,6 +69,23 @@
 make run-single
 ```
 
+### Частая проблема: `Role "ryazanvpn" does not exist`
+
+Если в логах Postgres есть:
+- `FATAL: password authentication failed for user "ryazanvpn"`
+- `DETAIL: Role "ryazanvpn" does not exist`
+
+значит используется **старый том** `postgres_data`, который был инициализирован с другим `POSTGRES_USER`/`POSTGRES_DB`.
+Переменные окружения применяются только при **первой** инициализации тома.
+
+Решение для single-server:
+```bash
+docker compose --env-file .env.single.generated -f docker-compose.yml down -v
+docker compose --env-file .env.single.generated -f docker-compose.yml up --build
+```
+
+⚠️ `down -v` удалит данные Postgres/Redis в docker volumes. Для production сначала сделайте backup.
+
 Проверка:
 ```bash
 curl http://localhost:8080/health
