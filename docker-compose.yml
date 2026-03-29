@@ -48,6 +48,8 @@ services:
       context: .
       args:
         SERVICE: cmd/control-plane
+    env_file:
+      - .env
     environment:
       HTTP_ADDR: ":8080"
       POSTGRES_URL: "postgres://ryazan:password1234@postgres:5432/ryazanvpn?sslmode=disable"
@@ -76,6 +78,8 @@ services:
       context: .
       args:
         SERVICE: cmd/node-agent
+    env_file:
+      - .env
     environment:
       HTTP_ADDR: ":8081"
       LOG_LEVEL: "info"
