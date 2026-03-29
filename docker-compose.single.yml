@@ -44,6 +44,9 @@ services:
         SERVICE: cmd/control-plane
     restart: unless-stopped
     env_file: [.env.single.generated]
+    environment:
+      HTTP_ADDR: ${CONTROL_PLANE_HTTP_ADDR}
+      CONTROL_PLANE_HTTP_ADDR: ${CONTROL_PLANE_HTTP_ADDR}
     ports:
       - "8080:8080"
     depends_on:
@@ -61,26 +64,17 @@ services:
         SERVICE: cmd/node-agent
     restart: unless-stopped
     env_file: [.env.single.generated]
+    environment:
+      HTTP_ADDR: ${NODE_AGENT_HTTP_ADDR}
+      NODE_AGENT_HTTP_ADDR: ${NODE_AGENT_HTTP_ADDR}
+      DOCKER_BINARY_PATH: ${DOCKER_BINARY_PATH}
+      RUNTIME_ADAPTER: ${RUNTIME_ADAPTER}
+      AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME}
+      AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME}
     ports:
       - "8081:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-  #caddy:
-  #  image: caddy:2-alpine
-  #  restart: unless-stopped
-  #  env_file: [.env.single.generated]
-  #  ports:
-  #    - "80:80"
-  #    - "443:443"
-  #  volumes:
-  #    - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-  #    - caddy_data:/data
-  #    - caddy_config:/config
-  #  depends_on:
-  #    - control-plane
-
 volumes:
   postgres_data:
-  caddy_data:
-  caddy_config:

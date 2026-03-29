@@ -9,6 +9,7 @@ import (
 var (
 	ErrOperationConflict = errors.New("operation id already used for another action")
 	ErrNotImplemented    = errors.New("runtime operation is not implemented")
+	ErrUnavailable       = errors.New("runtime unavailable")
 )
 
 type PeerOperationRequest struct {

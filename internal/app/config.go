@@ -58,7 +58,7 @@ type Config struct {
 func LoadConfig(serviceName string) (Config, error) {
 	cfg := Config{
 		ServiceName:             serviceName,
-		HTTPAddr:                envOrDefault("HTTP_ADDR", ":8080"),
+		HTTPAddr:                serviceHTTPAddr(serviceName),
 		ShutdownTimeout:         durationFromEnv("SHUTDOWN_TIMEOUT", 15*time.Second),
 		LogLevel:                envOrDefault("LOG_LEVEL", "info"),
 		PostgresURL:             os.Getenv("POSTGRES_URL"),
@@ -88,7 +88,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		RuntimeStatsArgs:        csvListFromEnv("RUNTIME_STATS_ARGS"),
 		AmneziaContainerName:    envOrDefault("AMNEZIA_CONTAINER_NAME", "amnezia-awg2"),
 		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", "awg0"),
-		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "docker"),
+		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "/usr/bin/docker"),
 		VPNSubnetCIDR:           envOrDefault("VPN_SUBNET_CIDR", "10.8.1.0/24"),
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
 		VPNServerPublicKey:      envOrDefault("VPN_SERVER_PUBLIC_KEY", ""),
@@ -118,6 +118,22 @@ func LoadConfig(serviceName string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func serviceHTTPAddr(serviceName string) string {
+	var scopedKey string
+	switch serviceName {
+	case "control-plane":
+		scopedKey = "CONTROL_PLANE_HTTP_ADDR"
+	case "node-agent":
+		scopedKey = "NODE_AGENT_HTTP_ADDR"
+	}
+	if scopedKey != "" {
+		if v := strings.TrimSpace(os.Getenv(scopedKey)); v != "" {
+			return v
+		}
+	}
+	return envOrDefault("HTTP_ADDR", ":8080")
 }
 
 func envOrDefault(key, fallback string) string {
