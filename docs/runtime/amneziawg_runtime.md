@@ -19,6 +19,11 @@
 - `AMNEZIA_CONTAINER_NAME` (пример: `amnezia-awg2`)
 - `AMNEZIA_INTERFACE_NAME` (пример: `awg0`)
 
+Если `node-agent` запущен в Docker, нужно пробросить в контейнер:
+- `- /var/run/docker.sock:/var/run/docker.sock`
+
+Docker daemon внутри контейнера не требуется: `node-agent` использует Docker CLI в контейнере и Docker socket хоста.
+
 ## Формат вывода для ListPeerStats
 Используется `docker exec <container> awg show all dump`.
 Парсятся peer-строки формата wireguard dump:
