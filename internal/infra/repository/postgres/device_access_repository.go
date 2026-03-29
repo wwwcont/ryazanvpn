@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/wwwcont/ryazanvpn/internal/domain/access"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
 )
 
 type DeviceAccessRepository struct {
@@ -136,6 +136,24 @@ ORDER BY created_at DESC`
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *DeviceAccessRepository) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	const query = `
+SELECT id::text, device_id::text, vpn_node_id::text, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
+FROM device_accesses
+WHERE vpn_node_id = $1 AND status = 'active' AND assigned_ip = $2
+ORDER BY created_at DESC
+LIMIT 1`
+
+	out, err := scanAccess(r.q.QueryRow(ctx, query, nodeID, assignedIP))
+	if isNoRows(err) {
+		return nil, access.ErrNotFound
+	}
+	if err != nil {
 		return nil, err
 	}
 	return out, nil

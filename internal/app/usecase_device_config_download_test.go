@@ -59,6 +59,9 @@ func (r *cfgAccessRepo) SetConfigBlobEncrypted(_ context.Context, _ string, blob
 func (r *cfgAccessRepo) GetActiveByDeviceID(context.Context, string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{r.entry}, nil
 }
+func (r *cfgAccessRepo) GetActiveByNodeAndAssignedIP(context.Context, string, string) (*access.DeviceAccess, error) {
+	return r.entry, nil
+}
 
 type cfgTokenRepo struct {
 	entry *token.ConfigDownloadToken

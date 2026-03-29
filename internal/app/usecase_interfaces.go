@@ -44,6 +44,10 @@ type KeyGenerator interface {
 	Generate(ctx context.Context) (publicKey string, privateKey string, err error)
 }
 
+type PresharedKeyGenerator interface {
+	GeneratePresharedKey(ctx context.Context) (string, error)
+}
+
 type IPAllocator interface {
 	Allocate(ctx context.Context, nodeID string) (string, error)
 }
@@ -74,6 +78,10 @@ type NodeAgentOperationRequest struct {
 
 type NodeTrafficCounter struct {
 	DeviceAccessID  string
+	PeerPublicKey   string
+	AllowedIP       string
+	Endpoint        string
+	PresharedKey    string
 	RXTotalBytes    int64
 	TXTotalBytes    int64
 	LastHandshakeAt *time.Time

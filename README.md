@@ -50,6 +50,10 @@ Env для `control-plane`:
 - `REDIS_ADDR` (default: `redis:6379`)
 - `REDIS_PASSWORD` (optional)
 - `REDIS_DB` (default: `0`)
+- `VPN_SUBNET_CIDR` (default: `10.8.1.0/24`)
+- `VPN_SERVER_PUBLIC_ENDPOINT` (пример: `193.29.224.182:41475`)
+- `VPN_SERVER_PUBLIC_KEY` (server public key)
+- `VPN_CLIENT_ALLOWED_IPS` (CSV, default: `0.0.0.0/0,::/0`)
 
 ## Локальный запуск
 
@@ -90,6 +94,9 @@ Env для node-agent:
 - `WG_BINARY_PATH` (default `/usr/bin/wg`)
 - `IP_BINARY_PATH` (default `/usr/sbin/ip`)
 - `RUNTIME_EXEC_TIMEOUT` (default `10s`)
+- `DOCKER_BINARY_PATH` (default `/usr/bin/docker`)
+- `AMNEZIA_CONTAINER_NAME` (default `amnezia-awg2`)
+- `AMNEZIA_INTERFACE_NAME` (default `awg0`)
 
 `node-agent` не использует PostgreSQL/Redis в startup path и в endpoints `/health`, `/ready`, `/agent/v1/operations/*`.
 
@@ -280,5 +287,19 @@ Control-plane предоставляет минимальный эксплуат
    - `IP_BINARY_PATH`
    - `RUNTIME_EXEC_TIMEOUT`
 3. Убедитесь, что binaries существуют на диске (health-check shell runtime это проверяет).
+
+### AmneziaWG Docker runtime adapter
+
+Для реального runtime используйте:
+
+- `RUNTIME_ADAPTER=amnezia_docker`
+- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
+- `AMNEZIA_INTERFACE_NAME=awg0`
+
+Вызовы runtime:
+- apply peer: `docker exec <container> awg set <iface> peer ...`
+- revoke peer: `docker exec <container> awg set <iface> peer <pub> remove`
+- stats: `docker exec <container> awg show all dump`
 
 Важно: в текущем MVP shell adapter содержит только шаблонную безопасную реализацию с TODO и structured logs; команды управления VPN peers (apply/revoke) намеренно не реализованы до финализации и валидации production runbook.

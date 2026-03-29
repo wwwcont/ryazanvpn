@@ -16,11 +16,13 @@ type IssueDeviceConfigInput struct {
 	DeviceAccessID   string
 	DevicePrivateKey string
 	ServerPublicKey  string
+	PresharedKey     string
 	AssignedIP       string
 	DNS              []string
 	EndpointHost     string
 	EndpointPort     int
 	Keepalive        int
+	AllowedIPs       []string
 	TokenTTL         time.Duration
 }
 
@@ -54,11 +56,13 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	cfg, err := uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{
 		DevicePrivateKey: in.DevicePrivateKey,
 		ServerPublicKey:  in.ServerPublicKey,
+		PresharedKey:     in.PresharedKey,
 		AssignedIP:       in.AssignedIP,
 		DNS:              in.DNS,
 		EndpointHost:     in.EndpointHost,
 		EndpointPort:     in.EndpointPort,
 		Keepalive:        in.Keepalive,
+		AllowedIPs:       in.AllowedIPs,
 	})
 	if err != nil {
 		return nil, err

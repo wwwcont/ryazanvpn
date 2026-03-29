@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +41,7 @@ type CreateDeviceForUser struct {
 	Operations         NodeOperationRepository
 	AuditLogs          AuditLogRepository
 	KeyGenerator       KeyGenerator
+	PresharedKeys      PresharedKeyGenerator
 	IPAllocator        IPAllocator
 	NodeAssigner       NodeAssigner
 	CreatePeerExecutor *ExecuteCreatePeerOperation
@@ -47,9 +49,12 @@ type CreateDeviceForUser struct {
 	ServerPublicKey    string
 	EndpointHost       string
 	EndpointPort       int
+	PublicEndpoint     string
 	DNS                []string
+	ClientAllowedIPs   []string
 	Keepalive          int
 	TokenTTL           time.Duration
+	SensitiveEncryptor EncryptionService
 }
 
 func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUserInput) (*CreateDeviceForUserOutput, error) {
@@ -78,6 +83,18 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	if err != nil {
 		return nil, err
 	}
+	presharedKey, err := uc.generatePresharedKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+	presharedForPayload := presharedKey
+	if uc.SensitiveEncryptor != nil {
+		encryptedPSK, encErr := uc.SensitiveEncryptor.Encrypt([]byte(presharedKey))
+		if encErr != nil {
+			return nil, encErr
+		}
+		presharedForPayload = "enc:v1:" + encodeBase64(encryptedPSK)
+	}
 
 	createdDevice, err := uc.Devices.Create(ctx, device.CreateParams{
 		UserID:    in.UserID,
@@ -102,12 +119,13 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"device_id":   createdDevice.ID,
-		"access_id":   createdAccess.ID,
-		"public_key":  publicKey,
-		"assigned_ip": assignedIP,
-		"protocol":    "wireguard",
-		"keepalive":   25,
+		"device_id":     createdDevice.ID,
+		"access_id":     createdAccess.ID,
+		"public_key":    publicKey,
+		"assigned_ip":   assignedIP,
+		"protocol":      "wireguard",
+		"keepalive":     25,
+		"preshared_key": presharedForPayload,
 	})
 
 	op, err := uc.Operations.Create(ctx, operation.CreateParams{
@@ -143,18 +161,21 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		return nil, fmt.Errorf("create audit log: %w", err)
 	}
 
-	vpnHost, vpnPort := splitEndpointHostPort(selectedNode.VPNEndpoint)
+	endpoint := valueOrDefault(uc.PublicEndpoint, selectedNode.VPNEndpoint)
+	vpnHost, vpnPort := splitEndpointHostPort(endpoint)
 	issuedToken := ""
 	if uc.ConfigIssuer != nil {
 		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
 			DeviceAccessID:   createdAccess.ID,
 			DevicePrivateKey: privateKey,
 			ServerPublicKey:  uc.ServerPublicKey,
+			PresharedKey:     presharedKey,
 			AssignedIP:       assignedIP,
 			DNS:              uc.DNS,
 			EndpointHost:     valueOrDefault(uc.EndpointHost, vpnHost),
 			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, vpnPort),
 			Keepalive:        valueOrDefaultInt(uc.Keepalive, 25),
+			AllowedIPs:       uc.ClientAllowedIPs,
 			TokenTTL:         uc.TokenTTL,
 		})
 		if err != nil {
@@ -164,6 +185,13 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	}
 
 	return &CreateDeviceForUserOutput{Device: createdDevice, Access: createdAccess, PrivateKey: privateKey, Node: selectedNode, ConfigDownloadToken: issuedToken}, nil
+}
+
+func (uc CreateDeviceForUser) generatePresharedKey(ctx context.Context) (string, error) {
+	if uc.PresharedKeys != nil {
+		return uc.PresharedKeys.GeneratePresharedKey(ctx)
+	}
+	return "", errors.New("preshared key generator is required")
 }
 
 type AssignNodeForDeviceInput struct {
@@ -290,4 +318,8 @@ func splitEndpointHostPort(vpnEndpoint string) (string, int) {
 		port = 51820
 	}
 	return host, port
+}
+
+func encodeBase64(v []byte) string {
+	return base64.StdEncoding.EncodeToString(v)
 }

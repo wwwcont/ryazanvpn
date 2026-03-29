@@ -23,6 +23,13 @@ func (r *AmneziaWGRenderer) RenderAmneziaWG(in app.RenderAmneziaWGInput) (string
 	if len(in.DNS) == 0 {
 		in.DNS = []string{"1.1.1.1", "8.8.8.8"}
 	}
+	if len(in.AllowedIPs) == 0 {
+		in.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
+	}
+	pskLine := ""
+	if strings.TrimSpace(in.PresharedKey) != "" {
+		pskLine = fmt.Sprintf("PresharedKey = %s\n", in.PresharedKey)
+	}
 
 	cfg := fmt.Sprintf(`[Interface]
 PrivateKey = %s
@@ -31,16 +38,18 @@ DNS = %s
 
 [Peer]
 PublicKey = %s
-Endpoint = %s:%d
+%sEndpoint = %s:%d
+AllowedIPs = %s
 PersistentKeepalive = %d
-AllowedIPs = 0.0.0.0/0, ::/0
 `,
 		in.DevicePrivateKey,
 		in.AssignedIP,
 		strings.Join(in.DNS, ", "),
 		in.ServerPublicKey,
+		pskLine,
 		in.EndpointHost,
 		in.EndpointPort,
+		strings.Join(in.AllowedIPs, ", "),
 		in.Keepalive,
 	)
 	return cfg, nil

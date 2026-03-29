@@ -38,10 +38,15 @@ type OperationResult struct {
 }
 
 type PeerStat struct {
-	DeviceAccessID  string     `json:"device_access_id"`
-	RXTotalBytes    int64      `json:"rx_total_bytes"`
-	TXTotalBytes    int64      `json:"tx_total_bytes"`
-	LastHandshakeAt *time.Time `json:"last_handshake_at,omitempty"`
+	DeviceAccessID          string     `json:"device_access_id,omitempty"`
+	PeerPublicKey           string     `json:"peer_public_key,omitempty"`
+	PresharedKey            string     `json:"preshared_key,omitempty"`
+	Endpoint                string     `json:"endpoint,omitempty"`
+	AllowedIP               string     `json:"allowed_ip,omitempty"`
+	LatestHandshakeUnixTime int64      `json:"latest_handshake_unix_timestamp,omitempty"`
+	RXTotalBytes            int64      `json:"rx_total_bytes"`
+	TXTotalBytes            int64      `json:"tx_total_bytes"`
+	LastHandshakeAt         *time.Time `json:"last_handshake_at,omitempty"`
 }
 
 type PeerManager interface {

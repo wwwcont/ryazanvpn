@@ -111,6 +111,9 @@ func (f *execFakeAccess) SetConfigBlobEncrypted(ctx context.Context, id string, 
 func (f *execFakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{f.entry}, nil
 }
+func (f *execFakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	return f.entry, nil
+}
 
 type execFakeNodes struct {
 	node        *node.Node

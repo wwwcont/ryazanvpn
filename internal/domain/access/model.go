@@ -29,6 +29,7 @@ type Repository interface {
 	MarkError(ctx context.Context, id string, failedAt time.Time, message string) error
 	SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error
 	GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*DeviceAccess, error)
+	GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*DeviceAccess, error)
 }
 
 type CreateParams struct {
