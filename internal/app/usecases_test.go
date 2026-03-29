@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
 func TestRegisterTelegramUser_CreateWhenMissing(t *testing.T) {
@@ -126,6 +128,62 @@ func TestCreateDeviceForUser_AssignsMinLoadNode(t *testing.T) {
 	}
 	if out.PrivateKey == "" {
 		t.Fatal("expected private key")
+	}
+}
+
+func TestCreateDeviceForUser_RejectsMismatchedKeypair(t *testing.T) {
+	uc := CreateDeviceForUser{
+		Devices:       &fakeDevices{activeErr: device.ErrNotFound, created: &device.Device{ID: "d1", UserID: "u1"}},
+		Nodes:         &fakeNodes{active: []*node.Node{{ID: "n1", Status: node.StatusActive}}},
+		Accesses:      &fakeAccess{created: &access.DeviceAccess{ID: "a1", DeviceID: "d1", VPNNodeID: "n1"}},
+		Operations:    &fakeOps{},
+		AuditLogs:     &fakeAudit{},
+		KeyGenerator:  fakeBrokenKeys{},
+		PresharedKeys: fakeKeys{},
+		IPAllocator:   fakeIPAlloc{ip: "10.10.0.2/32"},
+		NodeAssigner:  MinLoadNodeAssigner{},
+	}
+
+	if _, err := uc.Execute(context.Background(), CreateDeviceForUserInput{UserID: "u1", Name: "iphone"}); err == nil {
+		t.Fatal("expected error for mismatched keypair")
+	}
+}
+
+func TestCreateDeviceForUser_PeerPayloadUsesDerivedPublicKey(t *testing.T) {
+	devRepo := &fakeDevices{activeErr: device.ErrNotFound, created: &device.Device{ID: "d1", UserID: "u1"}}
+	opRepo := &fakeOps{}
+	uc := CreateDeviceForUser{
+		Devices:       devRepo,
+		Nodes:         &fakeNodes{active: []*node.Node{{ID: "n1", CurrentLoad: 1, UserCapacity: 40, Status: node.StatusActive}}},
+		Accesses:      &fakeAccess{created: &access.DeviceAccess{ID: "a1", DeviceID: "d1", VPNNodeID: "n1"}},
+		Operations:    opRepo,
+		AuditLogs:     &fakeAudit{},
+		KeyGenerator:  fakeKeys{},
+		PresharedKeys: fakeKeys{},
+		IPAllocator:   fakeIPAlloc{ip: "10.10.0.2/32"},
+		NodeAssigner:  MinLoadNodeAssigner{},
+	}
+
+	out, err := uc.Execute(context.Background(), CreateDeviceForUserInput{UserID: "u1", Name: "iphone"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	derived, err := wgkeys.DerivePublicKey(out.PrivateKey)
+	if err != nil {
+		t.Fatalf("derive public key: %v", err)
+	}
+	if devRepo.lastCreate == nil || devRepo.lastCreate.PublicKey != derived {
+		t.Fatalf("device public key must match derived public key: got=%q want=%q", devRepo.lastCreate.PublicKey, derived)
+	}
+	if opRepo.lastCreate == nil {
+		t.Fatal("expected operation payload")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(opRepo.lastCreate.PayloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got, _ := payload["public_key"].(string); got != derived {
+		t.Fatalf("operation peer public key mismatch: got=%q want=%q", got, derived)
 	}
 }
 
@@ -298,13 +356,15 @@ func (f *fakeAccessGrants) RevokeActiveByUserID(ctx context.Context, userID stri
 }
 
 type fakeDevices struct {
-	active    *device.Device
-	activeErr error
-	created   *device.Device
-	list      []*device.Device
+	active     *device.Device
+	activeErr  error
+	created    *device.Device
+	list       []*device.Device
+	lastCreate *device.CreateParams
 }
 
 func (f *fakeDevices) Create(ctx context.Context, in device.CreateParams) (*device.Device, error) {
+	f.lastCreate = &in
 	return f.created, nil
 }
 func (f *fakeDevices) ListByUserID(ctx context.Context, userID string) ([]*device.Device, error) {
@@ -361,7 +421,10 @@ func (f *fakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID st
 	return nil, access.ErrNotFound
 }
 
-type fakeOps struct{ created *operation.NodeOperation }
+type fakeOps struct {
+	created    *operation.NodeOperation
+	lastCreate *operation.CreateParams
+}
 
 func (f *fakeOps) GetByID(ctx context.Context, id string) (*operation.NodeOperation, error) {
 	if f.created != nil {
@@ -371,6 +434,7 @@ func (f *fakeOps) GetByID(ctx context.Context, id string) (*operation.NodeOperat
 }
 
 func (f *fakeOps) Create(ctx context.Context, in operation.CreateParams) (*operation.NodeOperation, error) {
+	f.lastCreate = &in
 	if f.created != nil {
 		return f.created, nil
 	}
@@ -391,9 +455,20 @@ func (f *fakeAudit) Create(ctx context.Context, in audit.CreateParams) (*audit.L
 type fakeKeys struct{}
 
 func (fakeKeys) Generate(ctx context.Context) (string, string, error) {
-	return "pub", "priv", nil
+	priv := "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI="
+	pub, err := wgkeys.DerivePublicKey(priv)
+	if err != nil {
+		return "", "", err
+	}
+	return pub, priv, nil
 }
 func (fakeKeys) GeneratePresharedKey(ctx context.Context) (string, error) { return "psk", nil }
+
+type fakeBrokenKeys struct{}
+
+func (fakeBrokenKeys) Generate(ctx context.Context) (string, string, error) {
+	return "KS3O5dK5fty5waMzWBFE92ovd3xpOEOEY6P2j84a+Cg=", "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=", nil
+}
 
 type fakeIPAlloc struct{ ip string }
 

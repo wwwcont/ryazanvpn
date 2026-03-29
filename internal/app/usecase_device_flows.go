@@ -17,6 +17,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/device"
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
 var ErrUserAlreadyHasActiveDevice = errors.New("user already has active device")
@@ -71,6 +72,16 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	if err != nil {
 		return nil, err
 	}
+	derivedPublicKey, err := wgkeys.DerivePublicKey(privateKey)
+	if err != nil {
+		slog.Error("device keypair validation failed", "error", err)
+		return nil, fmt.Errorf("derive public key from private key: %w", err)
+	}
+	if strings.TrimSpace(publicKey) != derivedPublicKey {
+		slog.Error("device keypair mismatch", "generated_public_key", publicKey, "derived_public_key", derivedPublicKey)
+		return nil, fmt.Errorf("generated keypair mismatch: derived public key does not match generated public key")
+	}
+	publicKey = derivedPublicKey
 
 	activeNodes, err := uc.Nodes.ListActive(ctx)
 	if err != nil {
@@ -180,6 +191,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
 			DeviceAccessID:   createdAccess.ID,
 			DevicePrivateKey: privateKey,
+			DevicePublicKey:  publicKey,
 			ServerPublicKey:  serverPublicKey,
 			PresharedKey:     presharedKey,
 			AssignedIP:       assignedIP,
