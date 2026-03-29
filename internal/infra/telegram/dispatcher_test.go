@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/access"
 	"github.com/wwwcont/ryazanvpn/internal/domain/accessgrant"
 	"github.com/wwwcont/ryazanvpn/internal/domain/device"
-	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
@@ -56,11 +56,10 @@ func TestEnterCodePutsIntoAwaitState(t *testing.T) {
 	}
 }
 
-func TestInviteCodeActivatesAndIssuesToken(t *testing.T) {
+func TestInviteCodeActivatesAndSendsDocument(t *testing.T) {
 	bot := &fakeBot{}
 	state := &MemoryStateStore{}
 	accRepo := &fakeAccesses{byID: &access.DeviceAccess{ID: "a1", DeviceID: "d1", ConfigBlobEncrypted: []byte("x")}}
-	tokRepo := &fakeTokens{}
 	svc := &TelegramService{
 		Bot:              bot,
 		States:           state,
@@ -71,20 +70,21 @@ func TestInviteCodeActivatesAndIssuesToken(t *testing.T) {
 		CreateDeviceUC:  fakeCreateDevice{out: &app.CreateDeviceForUserOutput{Access: &access.DeviceAccess{ID: "a1"}}},
 		Devices:         &fakeDevices{activeErr: device.ErrNotFound},
 		Accesses:        accRepo,
-		Tokens:          tokRepo,
 		AccessGrants:    &fakeAccessGrantRepo{latest: nil},
 		DownloadBaseURL: "https://vpn.example.com",
 		TokenTTL:        10 * time.Minute,
+		ConfigEncryptor: fakeEncryptor{},
 	}
 
 	_ = state.Set(context.Background(), 301, StateAwaitInvite)
 	svc.HandleUpdate(context.Background(), Update{Message: &Message{Text: "1234", From: User{ID: 301}, Chat: Chat{ID: 301}}})
 
-	if len(tokRepo.created) != 1 {
-		t.Fatalf("expected 1 token, got %d", len(tokRepo.created))
-	}
 	if len(bot.messages) == 0 {
 		t.Fatal("expected bot messages")
+	}
+	last := bot.messages[len(bot.messages)-1]
+	if !strings.Contains(last.text, "Готово") {
+		t.Fatalf("expected document caption, got %q", last.text)
 	}
 }
 
@@ -98,6 +98,14 @@ type sentMessage struct {
 
 func (b *fakeBot) SendMessage(_ context.Context, chatID int64, text string, markup *InlineKeyboardMarkup) error {
 	b.messages = append(b.messages, sentMessage{chatID: chatID, text: text, markup: markup})
+	return nil
+}
+func (b *fakeBot) SendDocument(_ context.Context, chatID int64, filename string, content []byte, caption string, markup *InlineKeyboardMarkup) error {
+	b.messages = append(b.messages, sentMessage{chatID: chatID, text: caption, markup: markup})
+	return nil
+}
+func (b *fakeBot) SendPhoto(_ context.Context, chatID int64, filename string, content []byte, caption string, markup *InlineKeyboardMarkup) error {
+	b.messages = append(b.messages, sentMessage{chatID: chatID, text: caption, markup: markup})
 	return nil
 }
 func (b *fakeBot) AnswerCallbackQuery(_ context.Context, callbackID string, text string) error {
@@ -222,16 +230,10 @@ func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID 
 	return nil, access.ErrNotFound
 }
 
-type fakeTokens struct{ created []token.CreateParams }
+type fakeEncryptor struct{}
 
-func (f *fakeTokens) Create(ctx context.Context, in token.CreateParams) (*token.ConfigDownloadToken, error) {
-	f.created = append(f.created, in)
-	return &token.ConfigDownloadToken{ID: "t1"}, nil
-}
-func (f *fakeTokens) GetByTokenHash(ctx context.Context, tokenHash string) (*token.ConfigDownloadToken, error) {
-	return nil, errors.New("not implemented")
-}
-func (f *fakeTokens) MarkUsed(ctx context.Context, id string, consumedAt time.Time) error { return nil }
+func (fakeEncryptor) Encrypt(v []byte) ([]byte, error) { return v, nil }
+func (fakeEncryptor) Decrypt(v []byte) ([]byte, error) { return v, nil }
 
 func TestRandIntNRange(t *testing.T) {
 	for i := 0; i < 1000; i++ {

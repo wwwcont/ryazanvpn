@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -107,6 +108,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("device created", "user_id", in.UserID, "device_id", createdDevice.ID, "node_id", selectedNode.ID)
 
 	createdAccess, err := uc.Accesses.Create(ctx, access.CreateParams{
 		DeviceID:   createdDevice.ID,
@@ -117,6 +119,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("device access created", "device_id", createdDevice.ID, "access_id", createdAccess.ID, "assigned_ip", assignedIP)
 
 	payload, _ := json.Marshal(map[string]any{
 		"device_id":     createdDevice.ID,

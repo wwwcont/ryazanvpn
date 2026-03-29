@@ -3,17 +3,49 @@ SHELL := /bin/bash
 MIGRATE ?= migrate
 POSTGRES_URL ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
 POSTGRES_DSN ?= $(POSTGRES_URL)
+SINGLE_ENV ?= .env.single.generated
+SINGLE_COMPOSE = docker compose --env-file $(SINGLE_ENV) -f docker-compose.single.yml
 
-.PHONY: run-single run-backend run-node test lint migrate-up migrate-down
+.PHONY: \
+	run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
+	run-backend run-node \
+	test lint migrate-up migrate-down
 
 run-single:
-	docker compose --env-file .env.single.generated -f docker-compose.single.yml up --build
+	$(SINGLE_COMPOSE) up -d --build
+
+up-single:
+	$(SINGLE_COMPOSE) up -d --build
+
+down-single:
+	$(SINGLE_COMPOSE) down
+
+rebuild-single:
+	$(SINGLE_COMPOSE) up -d --build --force-recreate
+
+logs-single:
+	$(SINGLE_COMPOSE) logs -f
+
+logs-control:
+	$(SINGLE_COMPOSE) logs -f control-plane
+
+logs-agent:
+	$(SINGLE_COMPOSE) logs -f node-agent
+
+ps-single:
+	$(SINGLE_COMPOSE) ps
+
+restart-control:
+	$(SINGLE_COMPOSE) restart control-plane
+
+restart-agent:
+	$(SINGLE_COMPOSE) restart node-agent
 
 run-backend:
-	docker compose --env-file .env.backend.generated -f docker-compose.backend.yml up --build
+	docker compose --env-file .env.backend.generated -f docker-compose.backend.yml up -d --build
 
 run-node:
-	docker compose --env-file .env.node.generated -f docker-compose.node.yml up --build
+	docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build
 
 test:
 	go test ./...
