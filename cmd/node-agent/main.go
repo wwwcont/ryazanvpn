@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -32,10 +34,10 @@ func main() {
 	logger := logging.NewJSONLogger(cfg.LogLevel)
 	logger.Info("starting service", slog.String("config", cfg.String()))
 
-	vpnRuntime, err := buildRuntime(cfg, logger)
-	if err != nil {
-		logger.Error("runtime init failed", slog.Any("error", err))
-		os.Exit(1)
+	vpnRuntime, runtimeErr := buildRuntime(cfg, logger)
+	if runtimeErr != nil {
+		logger.Error("runtime init failed; using unavailable runtime", slog.Any("error", runtimeErr))
+		vpnRuntime = runtime.NewUnavailableRuntime(runtimeErr)
 	}
 
 	router := httpnode.NewRouter(httpnode.Options{
@@ -106,10 +108,33 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		return rt, nil
 	}
 	if adapter == "amnezia_docker" {
-		logger.Info("runtime adapter selected", slog.String("adapter", "amnezia_docker"))
+		resolved := cfg.DockerBinaryPath
+		found := false
+		if strings.TrimSpace(resolved) != "" {
+			if strings.ContainsRune(resolved, filepath.Separator) {
+				if _, err := os.Stat(resolved); err == nil {
+					found = true
+				}
+			} else if path, err := exec.LookPath(resolved); err == nil {
+				resolved = path
+				found = true
+			}
+		}
+		if !found {
+			if path, err := exec.LookPath("docker"); err == nil {
+				resolved = path
+				found = true
+			}
+		}
+		logger.Info("runtime adapter selected",
+			slog.String("adapter", "amnezia_docker"),
+			slog.String("docker_binary_configured", cfg.DockerBinaryPath),
+			slog.String("docker_binary_resolved", resolved),
+			slog.Bool("docker_binary_found", found),
+		)
 		rt := runtime.NewAmneziaDockerRuntime(logger, runtime.AmneziaDockerRuntimeConfig{
 			WorkDir:          cfg.RuntimeWorkDir,
-			DockerBinaryPath: cfg.DockerBinaryPath,
+			DockerBinaryPath: resolved,
 			ContainerName:    cfg.AmneziaContainerName,
 			InterfaceName:    cfg.AmneziaInterfaceName,
 			CommandTimeout:   cfg.RuntimeExecTimeout,

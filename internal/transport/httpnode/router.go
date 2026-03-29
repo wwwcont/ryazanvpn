@@ -30,9 +30,22 @@ func NewRouter(opts Options) http.Handler {
 	r.Use(httpcommon.AccessLogMiddleware(opts.Logger))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), opts.ReadinessTimeout)
+		defer cancel()
+
+		if err := opts.Runtime.Health(ctx); err != nil {
+			respondJSON(w, http.StatusOK, map[string]any{
+				"status":  "degraded",
+				"service": "node-agent",
+				"runtime": "unavailable",
+			})
+			return
+		}
+
 		respondJSON(w, http.StatusOK, map[string]any{
 			"status":  "ok",
 			"service": "node-agent",
+			"runtime": "available",
 		})
 	})
 
@@ -41,11 +54,15 @@ func NewRouter(opts Options) http.Handler {
 		defer cancel()
 
 		if err := opts.Runtime.Health(ctx); err != nil {
-			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "runtime"})
+			respondJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status":  "not_ready",
+				"reason":  "runtime",
+				"runtime": "unavailable",
+			})
 			return
 		}
 
-		respondJSON(w, http.StatusOK, map[string]any{"status": "ready", "service": "node-agent"})
+		respondJSON(w, http.StatusOK, map[string]any{"status": "ready", "service": "node-agent", "runtime": "available"})
 	})
 
 	r.Group(func(r chi.Router) {

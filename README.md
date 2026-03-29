@@ -4,102 +4,26 @@
 - `cmd/control-plane`
 - `cmd/node-agent`
 
-Архитектурные слои:
-- `internal/domain` — модели и доменные интерфейсы.
-- `internal/app` — use cases/workers.
-- `internal/infra` — postgres/redis/telegram/runtime adapters.
-- `internal/transport` — HTTP API.
+## Single-server режим (рекомендованный для 1 ноды)
 
----
-
-## Что уже подставлено из ваших данных
-
-Подставлены в `.env.single.generated` и `.env.backend.generated`:
-- `TELEGRAM_BOT_TOKEN=8799406539:AAG3s6Gylc4zWuS30SYy4gbeZabw0mMbOpI`
-- `TELEGRAM_ADMIN_IDS=7423296715`
-- `TELEGRAM_WEBHOOK_SECRET=webhooksecret123`
-- `PUBLIC_BASE_URL=https://api.rznvpn.online`
-- `VPN_SERVER_PUBLIC_ENDPOINT=193.29.224.182:41475`
-- `VPN_SERVER_PUBLIC_KEY=iyuNicNyxL3EWzP3JgRJdKozE8TXOArEU6TGcMoK5CU=`
-- `VPN_SUBNET_CIDR=10.8.1.0/24`
-- `RUNTIME_ADAPTER=amnezia_docker`
-- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
-- `AMNEZIA_INTERFACE_NAME=awg0`
-- `DOCKER_BINARY_PATH=docker`
-
----
-
-## Что вам нужно заполнить вручную
-
-В `.env.single.generated`, `.env.backend.generated`, `.env.node.generated` оставлены `CHANGE_ME_*`.
-
-Обязательные для выбора вручную:
-1. `POSTGRES_PASSWORD`
-2. `REDIS_PASSWORD`
-3. `NODE_AGENT_HMAC_SECRET` (`AGENT_HMAC_SECRET` на нодах должен быть **точно таким же**)
-4. `ADMIN_API_SECRET`
-5. `CONFIG_MASTER_KEY`
-
-### Как выбрать значения
-- `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `NODE_AGENT_HMAC_SECRET`, `ADMIN_API_SECRET`:
-  - длина 32+ символов, случайные, без пробелов.
-  - пример генерации: `openssl rand -base64 48`
-- `CONFIG_MASTER_KEY`:
-  - base64 от 32 случайных байт (AES-256).
-  - пример: `openssl rand -base64 32`
-
-После генерации просто замените `CHANGE_ME_*` в env-файлах.
-
-> ⚠️ `.env.single.generated` содержит реальные секреты. Не коммитьте его в публичный репозиторий.
-
----
-
-## Запуск: single-server (всё на одном сервере)
-
-Компоненты:
-- `control-plane`
+В single-server стеке запускаются:
 - `postgres`
 - `redis`
 - `migrate`
-- `node-agent`
-- `caddy`
+- `control-plane` (HTTP `:8080`)
+- `node-agent` (HTTP `:8081`)
 
-Команда:
+Запуск:
+
 ```bash
-make run-single
-```
+cp deploy/env/single-server.env.example .env.single.generated
+# заполните секреты
 
-### Частая проблема: `Role "ryazanvpn" does not exist`
-
-Если в логах Postgres есть:
-- `FATAL: password authentication failed for user "ryazanvpn"`
-- `DETAIL: Role "ryazanvpn" does not exist`
-
-значит используется **старый том** `postgres_data`, который был инициализирован с другим `POSTGRES_USER`/`POSTGRES_DB`.
-Переменные окружения применяются только при **первой** инициализации тома.
-
-Решение для single-server:
-```bash
-docker compose --env-file .env.single.generated -f docker-compose.yml down -v
-docker compose --env-file .env.single.generated -f docker-compose.yml up --build
-```
-
-⚠️ `down -v` удалит данные Postgres/Redis в docker volumes. Для production сначала сделайте backup.
-
-### Частая проблема: `fork/exec /usr/bin/docker: no such file or directory` в `node-agent`
-
-`node-agent` в режиме `RUNTIME_ADAPTER=amnezia_docker` использует Docker CLI внутри контейнера.
-Docker daemon в контейнер не нужен — используется Docker socket хоста.
-
-В актуальном образе `node-agent` Docker CLI уже установлен, а в compose нужен только:
-- `/var/run/docker.sock:/var/run/docker.sock`
-
-Если вы запускаете старый контейнер, перезапустите с пересозданием:
-```bash
-docker compose --env-file .env.single.generated -f docker-compose.single.yml up --build --force-recreate
+docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build
 ```
 
 Проверка:
+
 ```bash
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
@@ -107,93 +31,51 @@ curl http://localhost:8081/health
 curl http://localhost:8081/ready
 ```
 
-Telegram webhook:
-```bash
-curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  -d "url=${PUBLIC_BASE_URL}/internal/telegram/webhook" \
-  -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
-```
+## Разделение env для control-plane и node-agent
 
----
+Используются service-scoped переменные:
+- `CONTROL_PLANE_HTTP_ADDR` — адрес `control-plane` (по умолчанию `:8080`)
+- `NODE_AGENT_HTTP_ADDR` — адрес `node-agent` (по умолчанию `:8081`)
 
-## Запуск: multi-node (backend + много VPN нод)
+Для обратной совместимости остаётся `HTTP_ADDR`, но scoped-переменные имеют приоритет.
 
-### 1) Backend сервер
-Компоненты:
-- `control-plane`
-- `postgres`
-- `redis`
-- `migrate`
-- `caddy`
+В `docker-compose.single.yml` оба сервиса читают общий `env_file`, но критичные runtime/listen env задаются явно per-service.
 
-Команда:
-```bash
-make run-backend
-```
+## Runtime для Amnezia Docker
 
-### 2) Каждая VPN-нода отдельно
-Компоненты:
-- `node-agent`
+Для `RUNTIME_ADAPTER=amnezia_docker`:
+- `node-agent` использует Docker socket хоста: `/var/run/docker.sock:/var/run/docker.sock`
+- внутри image `node-agent` должен быть Docker CLI (`docker-cli`)
+- путь задаётся через `DOCKER_BINARY_PATH` (рекомендуется `/usr/bin/docker`)
 
-Команда:
-```bash
-make run-node
-```
+Если runtime недоступен при старте, `node-agent` больше не падает в crash loop:
+- HTTP сервер продолжает работать
+- `/health` показывает degraded
+- `/ready` возвращает `503` до восстановления runtime
+- operation endpoints возвращают `503 runtime unavailable`
 
-### 3) Регистрация ноды в БД
-Для каждой новой ноды заполните `vpn_nodes`:
-- `agent_base_url` — адрес node-agent для control-plane
-- `vpn_endpoint_host` / `vpn_endpoint_port` — публичный endpoint для клиентов
-- `server_public_key`
-- `vpn_subnet_cidr`
-- `status=active`
+## Обязательные env для single-server
 
----
+Минимум:
+- `CONTROL_PLANE_HTTP_ADDR=:8080`
+- `NODE_AGENT_HTTP_ADDR=:8081`
+- `NODE_AGENT_BASE_URL=http://node-agent:8081`
+- `RUNTIME_ADAPTER=amnezia_docker`
+- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
+- `AMNEZIA_INTERFACE_NAME=awg0`
+- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `VPN_SERVER_PUBLIC_ENDPOINT=193.29.224.182:41475`
+- `VPN_SERVER_PUBLIC_KEY=iyuNicNyxL3EWzP3JgRJdKozE8TXOArEU6TGcMoK5CU=`
+- `VPN_SUBNET_CIDR=10.8.1.0/24`
+- `VPN_CLIENT_ALLOWED_IPS=0.0.0.0/0,::/0`
 
-## Масштабирование
-
-### Горизонтально по нодам
-1. Поднимаете новый `node-agent`.
-2. Даёте ему общий `AGENT_HMAC_SECRET`.
-3. Добавляете запись в `vpn_nodes`.
-4. Проверяете `/api/v1/metrics/nodes` и Telegram «Статус нод».
-
-### Вертикально backend
-- Увеличиваете ресурсы backend сервера (CPU/RAM/IOPS).
-- Выносите Postgres на managed/replicated инстанс при росте.
-- Redis — отдельный инстанс/managed service.
-
----
-
-## Основные endpoints
-
-- Health:
-  - `GET /health`
-  - `GET /ready`
-- Telegram webhook:
-  - `POST /internal/telegram/webhook`
-- Config download:
-  - `GET /download/config/{token}`
-- Metrics API:
-  - `GET /api/v1/metrics/overview`
-  - `GET /api/v1/metrics/nodes`
-  - `GET /api/v1/metrics/users/{id}`
-
----
-
-## Make targets
-
-```bash
-make run-single
-make run-backend
-make run-node
-make migrate-up
-make migrate-down
-make test
-make lint
-```
-
----
+И секреты (заполняются вручную):
+- `POSTGRES_PASSWORD`
+- `REDIS_PASSWORD`
+- `AGENT_HMAC_SECRET`
+- `NODE_AGENT_HMAC_SECRET`
+- `ADMIN_API_SECRET`
+- `CONFIG_MASTER_KEY`
 
 ## Build/Test
 

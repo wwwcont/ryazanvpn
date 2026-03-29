@@ -62,6 +62,9 @@ func applyPeerHandler(logger *slog.Logger, vpn runtime.VPNRuntime) http.HandlerF
 			if errors.Is(err, runtime.ErrNotImplemented) {
 				status = http.StatusNotImplemented
 			}
+			if errors.Is(err, runtime.ErrUnavailable) {
+				status = http.StatusServiceUnavailable
+			}
 			respondError(w, status, err.Error())
 			return
 		}
@@ -97,6 +100,9 @@ func revokePeerHandler(logger *slog.Logger, vpn runtime.VPNRuntime) http.Handler
 			if errors.Is(err, runtime.ErrNotImplemented) {
 				status = http.StatusNotImplemented
 			}
+			if errors.Is(err, runtime.ErrUnavailable) {
+				status = http.StatusServiceUnavailable
+			}
 			respondError(w, status, err.Error())
 			return
 		}
@@ -128,6 +134,9 @@ func trafficCountersHandler(logger *slog.Logger, vpn runtime.VPNRuntime) http.Ha
 			status := http.StatusInternalServerError
 			if errors.Is(err, runtime.ErrNotImplemented) {
 				status = http.StatusNotImplemented
+			}
+			if errors.Is(err, runtime.ErrUnavailable) {
+				status = http.StatusServiceUnavailable
 			}
 			respondError(w, status, err.Error())
 			return
