@@ -88,8 +88,8 @@ func TestDefaultVPNEncodeDecodeRoundtrip(t *testing.T) {
 	if len(decoded.Containers) != 1 {
 		t.Fatalf("expected one container, got %d", len(decoded.Containers))
 	}
-	if decoded.Containers[0].AWG.Jmax != 50 {
-		t.Fatalf("unexpected Jmax: %d", decoded.Containers[0].AWG.Jmax)
+	if decoded.Containers[0].AWG.Jmax != "50" {
+		t.Fatalf("unexpected Jmax: %s", decoded.Containers[0].AWG.Jmax)
 	}
 }
 
@@ -124,6 +124,13 @@ func TestDefaultVPNGeneratedSchemaCompatibility(t *testing.T) {
 		t.Fatalf("subnet_address mismatch: %s", container.AWG.SubnetAddress)
 	}
 
+	if container.AWG.Jc != "4" {
+		t.Fatalf("awg.Jc mismatch: %s", container.AWG.Jc)
+	}
+	if container.AWG.Port != "41475" {
+		t.Fatalf("awg.port mismatch: %s", container.AWG.Port)
+	}
+
 	var lastCfg defaultVPNLastConfig
 	if err := json.Unmarshal([]byte(container.AWG.LastConfig), &lastCfg); err != nil {
 		t.Fatalf("unmarshal last_config: %v", err)
@@ -142,6 +149,57 @@ func TestDefaultVPNGeneratedSchemaCompatibility(t *testing.T) {
 	}
 	if !strings.Contains(lastCfg.Config, "Jc = 4") || !strings.Contains(lastCfg.Config, "I1 = <r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>") {
 		t.Fatalf("last_config.config must contain amneziawg fields")
+	}
+}
+
+func TestDefaultVPNExportedVPNKey_OfficialJSONTypesCompatibility(t *testing.T) {
+	exporter := NewDefaultVPNExporter()
+	key, err := exporter.ExportDefaultVPN(context.Background(), app.ExportVPNKeyInput{
+		Config:          sampleAWGConfig,
+		ClientPublicKey: "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		AWG:             sampleAWGFields(),
+	})
+	if err != nil {
+		t.Fatalf("ExportDefaultVPN error: %v", err)
+	}
+	decoded, err := DecodeDefaultVPN(key)
+	if err != nil {
+		t.Fatalf("DecodeDefaultVPN error: %v", err)
+	}
+	if len(decoded.Containers) == 0 {
+		t.Fatal("expected at least one container")
+	}
+
+	var awgPayload map[string]any
+	awgJSON, err := json.Marshal(decoded.Containers[0].AWG)
+	if err != nil {
+		t.Fatalf("marshal awg payload: %v", err)
+	}
+	if err := json.Unmarshal(awgJSON, &awgPayload); err != nil {
+		t.Fatalf("unmarshal awg payload: %v", err)
+	}
+	if _, ok := awgPayload["Jc"].(string); !ok {
+		t.Fatalf("awg.Jc must be string, got %T", awgPayload["Jc"])
+	}
+	if _, ok := awgPayload["port"].(string); !ok {
+		t.Fatalf("awg.port must be string, got %T", awgPayload["port"])
+	}
+
+	var lastConfigPayload map[string]any
+	if err := json.Unmarshal([]byte(decoded.Containers[0].AWG.LastConfig), &lastConfigPayload); err != nil {
+		t.Fatalf("unmarshal last_config payload: %v", err)
+	}
+	if _, ok := lastConfigPayload["Jc"].(string); !ok {
+		t.Fatalf("last_config.Jc must be string, got %T", lastConfigPayload["Jc"])
+	}
+	if _, ok := lastConfigPayload["mtu"].(string); !ok {
+		t.Fatalf("last_config.mtu must be string, got %T", lastConfigPayload["mtu"])
+	}
+	if _, ok := lastConfigPayload["persistent_keep_alive"].(string); !ok {
+		t.Fatalf("last_config.persistent_keep_alive must be string, got %T", lastConfigPayload["persistent_keep_alive"])
+	}
+	if _, ok := lastConfigPayload["port"].(float64); !ok {
+		t.Fatalf("last_config.port must be number, got %T", lastConfigPayload["port"])
 	}
 }
 
