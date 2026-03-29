@@ -11,15 +11,15 @@ type DefaultVPNAWGFields struct {
 	S2   int
 	S3   int
 	S4   int
-	H1   int
-	H2   int
-	H3   int
-	H4   int
-	I1   int
-	I2   int
-	I3   int
-	I4   int
-	I5   int
+	H1   string
+	H2   string
+	H3   string
+	H4   string
+	I1   string
+	I2   string
+	I3   string
+	I4   string
+	I5   string
 }
 
 type ExportVPNKeyInput struct {
@@ -34,6 +34,7 @@ type ExportVPNKeyInput struct {
 	SubnetAddress      string
 	ClientPublicKey    string
 	DefaultContainerID string
+	MTU                int
 	AWG                DefaultVPNAWGFields
 }
 

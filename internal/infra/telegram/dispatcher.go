@@ -100,6 +100,7 @@ type TelegramService struct {
 	NodeCapacity    int
 	ConfigEncryptor app.EncryptionService
 	VPNExporter     app.VPNKeyExporter
+	DefaultVPNMTU   int
 	DefaultVPNAWG   app.DefaultVPNAWGFields
 }
 
@@ -786,10 +787,14 @@ func (s *TelegramService) sendDefaultVPNKey(ctx context.Context, chatID int64, u
 	}
 
 	key, err := s.VPNExporter.ExportDefaultVPN(ctx, app.ExportVPNKeyInput{
-		Config:          configPlain,
-		Description:     "RyazanVPN",
-		ClientPublicKey: d.PublicKey,
-		AWG:             s.DefaultVPNAWG,
+		Config:             configPlain,
+		Description:        "RyazanVPN",
+		ProtocolVersion:    2,
+		TransportProto:     "udp",
+		DefaultContainerID: "amnezia-awg2",
+		ClientPublicKey:    d.PublicKey,
+		MTU:                s.DefaultVPNMTU,
+		AWG:                s.DefaultVPNAWG,
 	})
 	if err != nil {
 		s.logErr("export defaultvpn key", err)

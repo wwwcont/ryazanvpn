@@ -32,7 +32,8 @@ type defaultVPNEnvelope struct {
 }
 
 type defaultVPNContainer struct {
-	AWG defaultVPNAWG `json:"awg"`
+	Container string        `json:"container"`
+	AWG       defaultVPNAWG `json:"awg"`
 }
 
 type defaultVPNAWG struct {
@@ -43,33 +44,51 @@ type defaultVPNAWG struct {
 	S2              int    `json:"S2"`
 	S3              int    `json:"S3"`
 	S4              int    `json:"S4"`
-	H1              int    `json:"H1"`
-	H2              int    `json:"H2"`
-	H3              int    `json:"H3"`
-	H4              int    `json:"H4"`
-	I1              int    `json:"I1"`
-	I2              int    `json:"I2"`
-	I3              int    `json:"I3"`
-	I4              int    `json:"I4"`
-	I5              int    `json:"I5"`
+	H1              string `json:"H1"`
+	H2              string `json:"H2"`
+	H3              string `json:"H3"`
+	H4              string `json:"H4"`
+	I1              string `json:"I1"`
+	I2              string `json:"I2"`
+	I3              string `json:"I3"`
+	I4              string `json:"I4"`
+	I5              string `json:"I5"`
 	Port            int    `json:"port"`
-	ProtocolVersion int    `json:"protocol_version"`
+	ProtocolVersion string `json:"protocol_version"`
 	SubnetAddress   string `json:"subnet_address"`
 	TransportProto  string `json:"transport_proto"`
 	LastConfig      string `json:"last_config"`
 }
 
 type defaultVPNLastConfig struct {
-	ClientIP            string `json:"client_ip"`
-	ClientPrivateKey    string `json:"client_priv_key"`
-	ClientPublicKey     string `json:"client_pub_key"`
-	PSKKey              string `json:"psk_key"`
-	ServerPublicKey     string `json:"server_pub_key"`
-	HostName            string `json:"hostName"`
-	Port                int    `json:"port"`
-	PersistentKeepAlive int    `json:"persistent_keep_alive"`
-	AllowedIPs          string `json:"allowed_ips"`
-	Config              string `json:"config"`
+	ClientID            string   `json:"clientId"`
+	MTU                 int      `json:"mtu"`
+	Jc                  int      `json:"Jc"`
+	Jmin                int      `json:"Jmin"`
+	Jmax                int      `json:"Jmax"`
+	S1                  int      `json:"S1"`
+	S2                  int      `json:"S2"`
+	S3                  int      `json:"S3"`
+	S4                  int      `json:"S4"`
+	H1                  string   `json:"H1"`
+	H2                  string   `json:"H2"`
+	H3                  string   `json:"H3"`
+	H4                  string   `json:"H4"`
+	I1                  string   `json:"I1"`
+	I2                  string   `json:"I2"`
+	I3                  string   `json:"I3"`
+	I4                  string   `json:"I4"`
+	I5                  string   `json:"I5"`
+	ClientIP            string   `json:"client_ip"`
+	ClientPrivateKey    string   `json:"client_priv_key"`
+	ClientPublicKey     string   `json:"client_pub_key"`
+	PSKKey              string   `json:"psk_key"`
+	ServerPublicKey     string   `json:"server_pub_key"`
+	HostName            string   `json:"hostName"`
+	Port                int      `json:"port"`
+	PersistentKeepAlive int      `json:"persistent_keep_alive"`
+	AllowedIPs          []string `json:"allowed_ips"`
+	Config              string   `json:"config"`
 }
 
 type wgConfigParsed struct {
@@ -79,7 +98,7 @@ type wgConfigParsed struct {
 	PresharedKey        string
 	EndpointHost        string
 	EndpointPort        int
-	AllowedIPs          string
+	AllowedIPs          []string
 	PersistentKeepalive int
 }
 
@@ -97,21 +116,45 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 	if port <= 0 {
 		port = parsed.EndpointPort
 	}
+	clientPublicKey := strings.TrimSpace(in.ClientPublicKey)
+	if clientPublicKey == "" {
+		return "", fmt.Errorf("missing client public key")
+	}
+
+	clientIP := stripCIDRSuffix(parsed.ClientIP)
+	subnetAddress := deriveSubnetAddress(in.SubnetAddress, parsed.ClientIP)
+	mtu := defaultInt(in.MTU, 1376)
+	cfgText := firstNonEmpty(strings.TrimSpace(in.Config), "")
 
 	lastCfg := defaultVPNLastConfig{
-		ClientIP:            parsed.ClientIP,
+		ClientID:            clientPublicKey,
+		MTU:                 mtu,
+		Jc:                  in.AWG.Jc,
+		Jmin:                in.AWG.Jmin,
+		Jmax:                in.AWG.Jmax,
+		S1:                  in.AWG.S1,
+		S2:                  in.AWG.S2,
+		S3:                  in.AWG.S3,
+		S4:                  in.AWG.S4,
+		H1:                  strings.TrimSpace(in.AWG.H1),
+		H2:                  strings.TrimSpace(in.AWG.H2),
+		H3:                  strings.TrimSpace(in.AWG.H3),
+		H4:                  strings.TrimSpace(in.AWG.H4),
+		I1:                  strings.TrimSpace(in.AWG.I1),
+		I2:                  strings.TrimSpace(in.AWG.I2),
+		I3:                  strings.TrimSpace(in.AWG.I3),
+		I4:                  strings.TrimSpace(in.AWG.I4),
+		I5:                  strings.TrimSpace(in.AWG.I5),
+		ClientIP:            clientIP,
 		ClientPrivateKey:    parsed.ClientPrivateKey,
-		ClientPublicKey:     strings.TrimSpace(in.ClientPublicKey),
+		ClientPublicKey:     clientPublicKey,
 		PSKKey:              parsed.PresharedKey,
 		ServerPublicKey:     parsed.ServerPublicKey,
 		HostName:            host,
 		Port:                port,
 		PersistentKeepAlive: parsed.PersistentKeepalive,
 		AllowedIPs:          parsed.AllowedIPs,
-		Config:              in.Config,
-	}
-	if lastCfg.ClientPublicKey == "" {
-		return "", fmt.Errorf("missing client public key")
+		Config:              cfgText,
 	}
 	lastCfgJSON, err := json.Marshal(lastCfg)
 	if err != nil {
@@ -120,11 +163,12 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 
 	containerID := strings.TrimSpace(in.DefaultContainerID)
 	if containerID == "" {
-		containerID = "awg"
+		containerID = "amnezia-awg2"
 	}
 
 	envelope := defaultVPNEnvelope{
 		Containers: []defaultVPNContainer{{
+			Container: containerID,
 			AWG: defaultVPNAWG{
 				Jc:              in.AWG.Jc,
 				Jmin:            in.AWG.Jmin,
@@ -133,18 +177,18 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 				S2:              in.AWG.S2,
 				S3:              in.AWG.S3,
 				S4:              in.AWG.S4,
-				H1:              in.AWG.H1,
-				H2:              in.AWG.H2,
-				H3:              in.AWG.H3,
-				H4:              in.AWG.H4,
-				I1:              in.AWG.I1,
-				I2:              in.AWG.I2,
-				I3:              in.AWG.I3,
-				I4:              in.AWG.I4,
-				I5:              in.AWG.I5,
+				H1:              strings.TrimSpace(in.AWG.H1),
+				H2:              strings.TrimSpace(in.AWG.H2),
+				H3:              strings.TrimSpace(in.AWG.H3),
+				H4:              strings.TrimSpace(in.AWG.H4),
+				I1:              strings.TrimSpace(in.AWG.I1),
+				I2:              strings.TrimSpace(in.AWG.I2),
+				I3:              strings.TrimSpace(in.AWG.I3),
+				I4:              strings.TrimSpace(in.AWG.I4),
+				I5:              strings.TrimSpace(in.AWG.I5),
 				Port:            port,
-				ProtocolVersion: defaultInt(in.ProtocolVersion, 1),
-				SubnetAddress:   firstNonEmpty(strings.TrimSpace(in.SubnetAddress), parsed.ClientIP),
+				ProtocolVersion: firstNonEmpty(strings.TrimSpace(fmt.Sprintf("%d", defaultInt(in.ProtocolVersion, 2))), "2"),
+				SubnetAddress:   subnetAddress,
 				TransportProto:  firstNonEmpty(strings.TrimSpace(in.TransportProto), "udp"),
 				LastConfig:      string(lastCfgJSON),
 			},
@@ -252,7 +296,7 @@ func ParseWGConfig(cfg string) (wgConfigParsed, error) {
 				out.EndpointHost = host
 				out.EndpointPort = port
 			case "allowedips":
-				out.AllowedIPs = v
+				out.AllowedIPs = parseCSV(v)
 			case "persistentkeepalive":
 				fmt.Sscanf(v, "%d", &out.PersistentKeepalive)
 			}
@@ -264,8 +308,8 @@ func ParseWGConfig(cfg string) (wgConfigParsed, error) {
 	if out.PersistentKeepalive <= 0 {
 		out.PersistentKeepalive = 25
 	}
-	if out.AllowedIPs == "" {
-		out.AllowedIPs = "0.0.0.0/0, ::/0"
+	if len(out.AllowedIPs) == 0 {
+		out.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
 	}
 	return out, nil
 }
@@ -302,4 +346,50 @@ func defaultInt(v, fallback int) int {
 		return fallback
 	}
 	return v
+}
+
+func parseCSV(v string) []string {
+	items := strings.Split(v, ",")
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func stripCIDRSuffix(v string) string {
+	v = strings.TrimSpace(v)
+	ip, _, err := net.ParseCIDR(v)
+	if err == nil {
+		return ip.String()
+	}
+	return v
+}
+
+func deriveSubnetAddress(inSubnetAddress, clientCIDR string) string {
+	if addr := strings.TrimSpace(inSubnetAddress); addr != "" {
+		if ip, network, err := net.ParseCIDR(addr); err == nil {
+			if network != nil {
+				return network.IP.String()
+			}
+			return ip.String()
+		}
+		return stripCIDRSuffix(addr)
+	}
+	if ip, _, err := net.ParseCIDR(strings.TrimSpace(clientCIDR)); err == nil {
+		v4 := ip.To4()
+		if v4 != nil {
+			return fmt.Sprintf("%d.%d.%d.0", v4[0], v4[1], v4[2])
+		}
+		return ip.String()
+	}
+	clientIP := stripCIDRSuffix(clientCIDR)
+	parsed := net.ParseIP(clientIP)
+	if v4 := parsed.To4(); v4 != nil {
+		return fmt.Sprintf("%d.%d.%d.0", v4[0], v4[1], v4[2])
+	}
+	return clientIP
 }
