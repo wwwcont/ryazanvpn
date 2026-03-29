@@ -130,6 +130,7 @@ func main() {
 				Traffic:         trafficRepo,
 				DownloadBaseURL: cfg.PublicBaseURL,
 				AdminIDs:        adminIDs,
+				ConfigEncryptor: encryptor,
 			}
 			telegramWebhookHandler = telegram.WebhookHandler{SecretToken: cfg.TelegramWebhookSecret, Service: tgSvc}
 		}

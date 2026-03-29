@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/access"
@@ -65,8 +67,12 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		AllowedIPs:       in.AllowedIPs,
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "missing required fields") {
+			slog.Error("config render input incomplete", "device_access_id", in.DeviceAccessID, "error", err)
+		}
 		return nil, err
 	}
+	slog.Info("config render input complete", "device_access_id", in.DeviceAccessID, "has_device_private_key", strings.TrimSpace(in.DevicePrivateKey) != "", "has_assigned_ip", strings.TrimSpace(in.AssignedIP) != "", "has_server_public_key", strings.TrimSpace(in.ServerPublicKey) != "", "has_endpoint_host", strings.TrimSpace(in.EndpointHost) != "", "endpoint_port", in.EndpointPort, "has_preshared_key", strings.TrimSpace(in.PresharedKey) != "")
 
 	encrypted, err := uc.Encryptor.Encrypt([]byte(cfg))
 	if err != nil {
@@ -92,6 +98,7 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("config download token created", "device_access_id", in.DeviceAccessID, "expires_at", expiresAt)
 
 	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt}, nil
 }

@@ -19,16 +19,30 @@
 cp deploy/env/single-server.env.example .env.single.generated
 # заполните секреты
 
-docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build
+make rebuild-single
 ```
 
 Проверка:
 
 ```bash
+make ps-single
 curl http://localhost:8080/health
-curl http://localhost:8080/ready
 curl http://localhost:8081/health
-curl http://localhost:8081/ready
+```
+
+Логи **не открываются автоматически** при запуске/пересборке.  
+Открывайте их только вручную:
+
+```bash
+make logs-control   # только control-plane
+make logs-agent     # только node-agent
+make logs-single    # весь стек
+```
+
+Остановка:
+
+```bash
+make down-single
 ```
 
 ## Разделение env для control-plane и node-agent
@@ -84,3 +98,37 @@ go build ./cmd/control-plane
 go build ./cmd/node-agent
 go test ./...
 ```
+
+## Рекомендуемый operational flow (single-server)
+
+```bash
+make rebuild-single   # сборка + запуск в фоне (-d)
+make ps-single        # статус контейнеров
+make logs-control     # логи control-plane по запросу
+make logs-agent       # логи node-agent по запросу
+```
+
+Опционально можно использовать скрипт-обёртку:
+
+```bash
+scripts/dev-single.sh up
+scripts/dev-single.sh ps
+scripts/dev-single.sh logs
+scripts/dev-single.sh down
+```
+
+## Telegram UX выдачи конфига
+
+После ввода валидного invite code бот выполняет полный pipeline:
+1. Создаёт `access_grant`.
+2. Создаёт `device` и `device_access`.
+3. Применяет peer через `node-agent`.
+4. Рендерит AmneziaWG/WireGuard `.conf`.
+5. Отправляет конфиг в Telegram как document attachment (`rznvpn.conf`).
+
+После успешной выдачи бот показывает inline-кнопки:
+- `Скачать .conf` — повторная отправка файла (основной сценарий).
+- `Показать QR` — отправка PNG QR для импорта.
+- `Показать текст` — fallback с текстом конфига.
+
+`/download/config/{token}` остаётся доступным для совместимости и внешнего download flow.

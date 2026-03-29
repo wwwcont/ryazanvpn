@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,12 +81,14 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 	if psk, err := uc.resolvePresharedKey(payload.PresharedKey); err == nil && psk != "" {
 		req.EndpointMeta["preshared_key"] = psk
 	}
+	slog.Info("apply peer start", "operation_id", op.ID, "access_id", accessEntry.ID, "node_id", op.VPNNodeID, "assigned_ip", payload.AssignedIP)
 
 	if err := uc.NodeClient.ApplyPeer(ctx, req); err != nil {
 		_ = uc.Operations.MarkFailed(ctx, op.ID, now, err.Error())
 		_ = uc.Accesses.MarkError(ctx, accessEntry.ID, now, err.Error())
 		return err
 	}
+	slog.Info("apply peer success", "operation_id", op.ID, "access_id", accessEntry.ID, "node_id", op.VPNNodeID)
 
 	if err := uc.Operations.MarkSuccess(ctx, op.ID, now); err != nil {
 		return err

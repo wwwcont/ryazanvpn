@@ -7,7 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -35,6 +38,9 @@ const (
 	cbHelp      = "c:hlp"
 	cbDeleteYes = "c:d:y"
 	cbDeleteNo  = "c:d:n"
+	cbCfgFile   = "c:f"
+	cbCfgQR     = "c:q"
+	cbCfgText   = "c:t"
 
 	cbAdminMenu   = "a:menu"
 	cbAdminSingle = "a:c1"
@@ -91,6 +97,7 @@ type TelegramService struct {
 	TokenTTL        time.Duration
 	AdminIDs        map[int64]struct{}
 	NodeCapacity    int
+	ConfigEncryptor app.EncryptionService
 }
 
 func (s *TelegramService) HandleUpdate(ctx context.Context, upd Update) {
@@ -226,6 +233,15 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 	case cbHelp:
 		s.sendHelp(ctx, chatID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Помощь")
+	case cbCfgFile:
+		s.sendConfigDocument(ctx, chatID, u.ID)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Отправляю .conf")
+	case cbCfgQR:
+		s.sendConfigQR(ctx, chatID, u.ID)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Готовлю QR")
+	case cbCfgText:
+		s.sendConfigText(ctx, chatID, u.ID)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю текст")
 	default:
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Неизвестное действие")
 	}
@@ -387,12 +403,22 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 
 	var accessID string
 	if d == nil {
+		s.logInfo("telegram.create_device.start", "user_id", userID, "chat_id", chatID)
 		out, err := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
 		if err != nil {
 			s.logErr("create device", err)
 			_ = s.Bot.SendMessage(ctx, chatID, "Не удалось создать устройство.", nil)
 			return
 		}
+		deviceID := ""
+		nodeID := ""
+		if out.Device != nil {
+			deviceID = out.Device.ID
+		}
+		if out.Node != nil {
+			nodeID = out.Node.ID
+		}
+		s.logInfo("telegram.create_device.success", "user_id", userID, "device_id", deviceID, "access_id", out.Access.ID, "node_id", nodeID)
 		accessID = out.Access.ID
 	} else {
 		actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
@@ -403,14 +429,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		accessID = actives[0].ID
 	}
 
-	tokenRaw, err := s.issueDownloadToken(ctx, accessID)
-	if err != nil {
-		s.logErr("issue download token", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось выдать ссылку на конфиг.", nil)
-		return
-	}
-	url := strings.TrimRight(s.DownloadBaseURL, "/") + "/download/config/" + tokenRaw
-	_ = s.Bot.SendMessage(ctx, chatID, "Конфиг готов ✅", &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "Скачать конфиг", URL: url}}}})
+	s.sendConfigDocumentByAccessID(ctx, chatID, userID, accessID)
 }
 
 func (s *TelegramService) askDeleteConfirm(ctx context.Context, chatID, telegramID int64) {
@@ -612,6 +631,13 @@ func mainMenu(isAdmin bool) *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
+func configReadyMenu() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
+		{{Text: "Скачать .conf", Data: cbCfgFile}},
+		{{Text: "Показать QR", Data: cbCfgQR}, {Text: "Показать текст", Data: cbCfgText}},
+	}}
+}
+
 func adminMenu() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
 		{{Text: "Создать 1 код", Data: cbAdminSingle}, {Text: "Создать пачку кодов", Data: cbAdminBatch}},
@@ -640,7 +666,122 @@ func (s *TelegramService) issueDownloadToken(ctx context.Context, accessID strin
 	if err != nil {
 		return "", err
 	}
+	s.logInfo("telegram.token.created", "access_id", accessID, "ttl", s.TokenTTL.String())
 	return raw, nil
+}
+
+func (s *TelegramService) sendConfigDocument(ctx context.Context, chatID int64, userID string) {
+	accessID, err := s.resolveActiveAccessID(ctx, userID)
+	if err != nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Нет готового конфига. Нажмите «Получить конфиг».", nil)
+		return
+	}
+	s.sendConfigDocumentByAccessID(ctx, chatID, userID, accessID)
+}
+
+func (s *TelegramService) sendConfigDocumentByAccessID(ctx context.Context, chatID int64, userID, accessID string) {
+	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
+	if err != nil {
+		s.logErr("load config plaintext", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Конфиг ещё не готов. Проверьте корректность invite code и попробуйте заново.", nil)
+		return
+	}
+
+	if err := s.Bot.SendDocument(ctx, chatID, "rznvpn.conf", []byte(configPlain), "Готово ✅ Конфиг для AmneziaWG/WireGuard", configReadyMenu()); err != nil {
+		s.logErr("telegram send document", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось отправить .conf файлом, используйте кнопку «Показать текст».", configReadyMenu())
+		return
+	}
+	s.logInfo("telegram.delivery.document", "user_id", userID, "access_id", accessID, "chat_id", chatID)
+}
+
+func (s *TelegramService) sendConfigQR(ctx context.Context, chatID int64, userID string) {
+	accessID, err := s.resolveActiveAccessID(ctx, userID)
+	if err != nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Нет готового конфига. Нажмите «Получить конфиг».", nil)
+		return
+	}
+	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
+	if err != nil {
+		s.logErr("load config plaintext for qr", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "QR недоступен: конфиг ещё не готов.", configReadyMenu())
+		return
+	}
+	png, err := s.generateConfigQR(ctx, configPlain)
+	if err != nil {
+		s.logErr("generate qr", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось сгенерировать QR.", configReadyMenu())
+		return
+	}
+	if err := s.Bot.SendPhoto(ctx, chatID, "rznvpn-qr.png", png, "QR для быстрого импорта конфига", configReadyMenu()); err != nil {
+		s.logErr("telegram send qr image", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось отправить QR, попробуйте снова.", configReadyMenu())
+		return
+	}
+	s.logInfo("telegram.delivery.qr", "user_id", userID, "access_id", accessID, "chat_id", chatID)
+}
+
+func (s *TelegramService) generateConfigQR(ctx context.Context, configPlain string) ([]byte, error) {
+	endpoint := "https://api.qrserver.com/v1/create-qr-code/?size=512x512&format=png&data=" + url.QueryEscape(configPlain)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("qr service status=%d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+}
+
+func (s *TelegramService) sendConfigText(ctx context.Context, chatID int64, userID string) {
+	accessID, err := s.resolveActiveAccessID(ctx, userID)
+	if err != nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Нет готового конфига. Нажмите «Получить конфиг».", nil)
+		return
+	}
+	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
+	if err != nil {
+		s.logErr("load config plaintext for text fallback", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Конфиг ещё не готов.", configReadyMenu())
+		return
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, "Текстовый fallback (лучше использовать файл .conf):\n```\n"+configPlain+"\n```", configReadyMenu())
+	s.logInfo("telegram.delivery.text", "user_id", userID, "access_id", accessID, "chat_id", chatID)
+}
+
+func (s *TelegramService) resolveActiveAccessID(ctx context.Context, userID string) (string, error) {
+	d, err := s.Devices.GetActiveByUserID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
+	if err != nil || len(actives) == 0 {
+		return "", fmt.Errorf("active access is missing for device_id=%s", d.ID)
+	}
+	return actives[0].ID, nil
+}
+
+func (s *TelegramService) loadConfigPlaintext(ctx context.Context, accessID string) (string, error) {
+	acc, err := s.Accesses.GetByID(ctx, accessID)
+	if err != nil {
+		return "", err
+	}
+	if len(acc.ConfigBlobEncrypted) == 0 {
+		return "", fmt.Errorf("config not ready for access_id=%s: encrypted blob is empty", accessID)
+	}
+	if s.ConfigEncryptor == nil {
+		return "", fmt.Errorf("config decryptor is not configured")
+	}
+	plain, err := s.ConfigEncryptor.Decrypt(acc.ConfigBlobEncrypted)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 func (s *TelegramService) isAdmin(telegramID int64) bool {
@@ -706,6 +847,12 @@ func humanBytes(v int64) string {
 func (s *TelegramService) logErr(msg string, err error) {
 	if s.Logger != nil {
 		s.Logger.Error(msg, slog.Any("error", err))
+	}
+}
+
+func (s *TelegramService) logInfo(msg string, args ...any) {
+	if s.Logger != nil {
+		s.Logger.Info(msg, args...)
 	}
 }
 
