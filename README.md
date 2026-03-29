@@ -86,6 +86,18 @@ docker compose --env-file .env.single.generated -f docker-compose.yml up --build
 
 ⚠️ `down -v` удалит данные Postgres/Redis в docker volumes. Для production сначала сделайте backup.
 
+### Частая проблема: `fork/exec /usr/bin/docker: no such file or directory` в `node-agent`
+
+`node-agent` в режиме `RUNTIME_ADAPTER=amnezia_docker` использует Docker CLI внутри контейнера.
+Docker daemon в контейнер не нужен — используется Docker socket хоста.
+
+В актуальном образе `node-agent` Docker CLI уже установлен, а в compose нужен только:
+- `/var/run/docker.sock:/var/run/docker.sock`
+
+Если вы запускаете старый контейнер, перезапустите с пересозданием:
+```bash
+docker compose --env-file .env.single.generated -f docker-compose.single.yml up --build --force-recreate
+```
 
 Проверка:
 ```bash

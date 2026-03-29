@@ -21,7 +21,8 @@
 
 Если `node-agent` запущен в Docker, нужно пробросить в контейнер:
 - `- /var/run/docker.sock:/var/run/docker.sock`
-- `- /usr/bin/docker:/usr/bin/docker:ro`
+
+Docker daemon внутри контейнера не требуется: `node-agent` использует Docker CLI в контейнере и Docker socket хоста.
 
 ## Формат вывода для ListPeerStats
 Используется `docker exec <container> awg show all dump`.
