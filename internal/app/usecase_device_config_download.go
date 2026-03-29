@@ -60,12 +60,14 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	}
 	derivedPublicKey, err := wgkeys.DerivePublicKey(in.DevicePrivateKey)
 	if err != nil {
-		slog.Error("config keypair validation failed", "device_access_id", in.DeviceAccessID, "error", err)
+		slog.Error("config keypair derivation failed", "device_access_id", in.DeviceAccessID, "error", err)
 		return nil, fmt.Errorf("derive public key from private key: %w", err)
 	}
-	if strings.TrimSpace(in.DevicePublicKey) != "" && strings.TrimSpace(in.DevicePublicKey) != derivedPublicKey {
-		slog.Error("config keypair mismatch", "device_access_id", in.DeviceAccessID, "stored_public_key", in.DevicePublicKey, "derived_public_key", derivedPublicKey)
-		return nil, fmt.Errorf("device key mismatch: stored public key does not match private key")
+	if strings.TrimSpace(in.DevicePublicKey) != "" {
+		if err := wgkeys.ValidateKeyPair(in.DevicePrivateKey, in.DevicePublicKey); err != nil {
+			slog.Error("config keypair mismatch", "device_access_id", in.DeviceAccessID, "stored_public_key", in.DevicePublicKey, "derived_public_key", derivedPublicKey)
+			return nil, fmt.Errorf("device key mismatch: stored public key does not match private key")
+		}
 	}
 
 	cfg, err := uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{

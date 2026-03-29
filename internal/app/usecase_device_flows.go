@@ -72,9 +72,13 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	if err != nil {
 		return nil, err
 	}
+	if err := wgkeys.ValidateKeyPair(privateKey, publicKey); err != nil {
+		slog.Error("device keypair validation failed", "error", err)
+		return nil, fmt.Errorf("validate generated keypair: %w", err)
+	}
 	derivedPublicKey, err := wgkeys.DerivePublicKey(privateKey)
 	if err != nil {
-		slog.Error("device keypair validation failed", "error", err)
+		slog.Error("device keypair derivation failed", "error", err)
 		return nil, fmt.Errorf("derive public key from private key: %w", err)
 	}
 	if strings.TrimSpace(publicKey) != derivedPublicKey {

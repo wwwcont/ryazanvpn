@@ -29,3 +29,16 @@ func TestGenerateKeyPair_Consistent(t *testing.T) {
 		t.Fatalf("generated keypair is inconsistent")
 	}
 }
+
+func TestValidateKeyPair(t *testing.T) {
+	pub, priv, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair error: %v", err)
+	}
+	if err := ValidateKeyPair(priv, pub); err != nil {
+		t.Fatalf("ValidateKeyPair unexpected error: %v", err)
+	}
+	if err := ValidateKeyPair(priv, "KS3O5dK5fty5waMzWBFE92ovd3xpOEOEY6P2j84a+Cg="); err == nil {
+		t.Fatal("expected mismatched keypair error")
+	}
+}
