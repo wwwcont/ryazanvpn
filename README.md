@@ -86,6 +86,7 @@ docker compose --env-file .env.single.generated -f docker-compose.yml up --build
 
 ⚠️ `down -v` удалит данные Postgres/Redis в docker volumes. Для production сначала сделайте backup.
 
+
 Проверка:
 ```bash
 curl http://localhost:8080/health
