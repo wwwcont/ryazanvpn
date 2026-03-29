@@ -47,6 +47,17 @@ func PublicMatchesPrivate(privateKeyBase64 string, publicKeyBase64 string) (bool
 	return derived == strings.TrimSpace(publicKeyBase64), nil
 }
 
+func ValidateKeyPair(privateKeyBase64 string, publicKeyBase64 string) error {
+	ok, err := PublicMatchesPrivate(privateKeyBase64, publicKeyBase64)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("keypair mismatch: provided public key does not match private key")
+	}
+	return nil
+}
+
 func decodePrivateKey(privateKeyBase64 string) ([]byte, error) {
 	privateRaw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(privateKeyBase64))
 	if err != nil {

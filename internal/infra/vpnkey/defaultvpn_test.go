@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/infra/configrenderer"
+	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
 const sampleAWGConfig = `[Interface]
@@ -171,5 +173,62 @@ func TestParseWGConfigCompatibility(t *testing.T) {
 	}
 	if len(parsed.AllowedIPs) != 2 {
 		t.Fatalf("expected allowed_ips array, got: %#v", parsed.AllowedIPs)
+	}
+}
+
+func TestDefaultVPNIntegration_ConfigRendererAndExporterUseSameClientKeypair(t *testing.T) {
+	clientPub, clientPriv, err := wgkeys.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("generate client keypair: %v", err)
+	}
+	serverPub, _, err := wgkeys.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("generate server keypair: %v", err)
+	}
+
+	cfg, err := configrenderer.NewAmneziaWGRenderer().RenderAmneziaWG(app.RenderAmneziaWGInput{
+		DevicePrivateKey: clientPriv,
+		ServerPublicKey:  serverPub,
+		PresharedKey:     "k9f4Jq8QqYWXSHI9hJfY2MqhSxYJ6mN7x6jG0Q2cL1A=",
+		AssignedIP:       "10.8.1.10/32",
+		MTU:              1376,
+		DNS:              []string{"1.1.1.1", "8.8.8.8"},
+		EndpointHost:     "vpn.example.com",
+		EndpointPort:     41475,
+		Keepalive:        25,
+		AllowedIPs:       []string{"0.0.0.0/0", "::/0"},
+		AWG:              sampleAWGFields(),
+	})
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+
+	key, err := NewDefaultVPNExporter().ExportDefaultVPN(context.Background(), app.ExportVPNKeyInput{
+		Config:          cfg,
+		ClientPublicKey: clientPub,
+		MTU:             1376,
+		AWG:             sampleAWGFields(),
+	})
+	if err != nil {
+		t.Fatalf("export default vpn: %v", err)
+	}
+	decoded, err := DecodeDefaultVPN(key)
+	if err != nil {
+		t.Fatalf("decode default vpn: %v", err)
+	}
+
+	var lastCfg defaultVPNLastConfig
+	if err := json.Unmarshal([]byte(decoded.Containers[0].AWG.LastConfig), &lastCfg); err != nil {
+		t.Fatalf("unmarshal last_config: %v", err)
+	}
+	derived, err := wgkeys.DerivePublicKey(lastCfg.ClientPrivateKey)
+	if err != nil {
+		t.Fatalf("derive public key from exported private key: %v", err)
+	}
+	if derived != lastCfg.ClientPublicKey {
+		t.Fatalf("exported client keypair mismatch: derived=%q stored=%q", derived, lastCfg.ClientPublicKey)
+	}
+	if lastCfg.ClientPublicKey != clientPub {
+		t.Fatalf("exported client public key mismatch: got=%q want=%q", lastCfg.ClientPublicKey, clientPub)
 	}
 }
