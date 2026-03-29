@@ -9,17 +9,22 @@ import (
 var ErrNotFound = errors.New("vpn node not found")
 
 type Node struct {
-	ID           string
-	Name         string
-	Region       string
-	AgentBaseURL string
-	VPNEndpoint  string
-	Status       string
-	CurrentLoad  int
-	UserCapacity int
-	LastSeenAt   *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              string
+	Name            string
+	Region          string
+	AgentBaseURL    string
+	VPNEndpoint     string
+	VPNEndpointHost string
+	VPNEndpointPort int
+	ServerPublicKey string
+	VPNSubnetCIDR   string
+	RuntimeMetadata map[string]any
+	Status          string
+	CurrentLoad     int
+	UserCapacity    int
+	LastSeenAt      *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Repository interface {

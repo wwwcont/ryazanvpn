@@ -95,6 +95,99 @@ func NewRouter(opts Options) http.Handler {
 		respondJSON(w, http.StatusOK, map[string]any{"status": "ready", "service": "control-plane"})
 	})
 
+	r.Get("/api/v1/metrics/overview", func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		var totalTraffic int64
+		if err := opts.PG.QueryRow(ctx, `SELECT COALESCE(SUM(total_bytes),0) FROM traffic_usage_daily`).Scan(&totalTraffic); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load total traffic"})
+			return
+		}
+		var traffic30 int64
+		if err := opts.PG.QueryRow(ctx, `SELECT COALESCE(SUM(total_bytes),0) FROM traffic_usage_daily WHERE usage_date >= CURRENT_DATE - INTERVAL '29 day'`).Scan(&traffic30); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load 30d traffic"})
+			return
+		}
+		var activeUsers int
+		if err := opts.PG.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM access_grants WHERE status='active' AND expires_at > NOW()`).Scan(&activeUsers); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load active users"})
+			return
+		}
+		var handshakeCount int
+		_ = opts.PG.QueryRow(ctx, `SELECT COUNT(*) FROM device_accesses WHERE status = 'active'`).Scan(&handshakeCount)
+		respondJSON(w, http.StatusOK, map[string]any{
+			"total_traffic_bytes":        totalTraffic,
+			"traffic_last_30_days_bytes": traffic30,
+			"active_users":               activeUsers,
+			"latest_handshake_count":     handshakeCount,
+			"avg_latency_ms":             nil,
+			"avg_speed_mbps":             nil,
+			"latency_status":             "not_available",
+			"speed_status":               "not_available",
+		})
+	})
+
+	r.Get("/api/v1/metrics/nodes", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := opts.PG.Query(r.Context(), `SELECT id::text, name, status, current_load, user_capacity, agent_base_url, vpn_endpoint, last_seen_at FROM vpn_nodes ORDER BY name`)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load nodes"})
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]any, 0)
+		for rows.Next() {
+			var id, name, status, agentURL, endpoint string
+			var load, capacity int
+			var lastSeen *time.Time
+			if err := rows.Scan(&id, &name, &status, &load, &capacity, &agentURL, &endpoint, &lastSeen); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to scan node"})
+				return
+			}
+			nodeLoad := 0.0
+			if capacity > 0 {
+				nodeLoad = float64(load) / float64(capacity)
+			}
+			items = append(items, map[string]any{
+				"id":             id,
+				"name":           name,
+				"status":         status,
+				"current_load":   load,
+				"user_capacity":  capacity,
+				"node_load":      nodeLoad,
+				"agent_base_url": agentURL,
+				"vpn_endpoint":   endpoint,
+				"last_seen_at":   lastSeen,
+			})
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"items": items})
+	})
+
+	r.Get("/api/v1/metrics/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		uid := strings.TrimSpace(chi.URLParam(r, "id"))
+		if uid == "" {
+			respondJSON(w, http.StatusBadRequest, map[string]any{"error": "id is required"})
+			return
+		}
+		var total int64
+		if err := opts.PG.QueryRow(r.Context(), `SELECT COALESCE(SUM(tud.total_bytes),0) FROM traffic_usage_daily tud JOIN devices d ON d.id=tud.device_id WHERE d.user_id = $1`, uid).Scan(&total); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load user total traffic"})
+			return
+		}
+		var last30 int64
+		if err := opts.PG.QueryRow(r.Context(), `SELECT COALESCE(SUM(tud.total_bytes),0) FROM traffic_usage_daily tud JOIN devices d ON d.id=tud.device_id WHERE d.user_id = $1 AND tud.usage_date >= CURRENT_DATE - INTERVAL '29 day'`, uid).Scan(&last30); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load user 30d traffic"})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"user_id":                    uid,
+			"total_traffic_bytes":        total,
+			"traffic_last_30_days_bytes": last30,
+			"avg_latency_ms":             nil,
+			"avg_speed_mbps":             nil,
+			"latency_status":             "not_available",
+			"speed_status":               "not_available",
+		})
+	})
+
 	r.Get("/download/config/{token}", func(w http.ResponseWriter, r *http.Request) {
 		if opts.DownloadUC == nil {
 			respondJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "download service disabled"})

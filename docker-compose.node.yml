@@ -1,0 +1,12 @@
+services:
+  node-agent:
+    build:
+      context: .
+      args:
+        SERVICE: cmd/node-agent
+    restart: unless-stopped
+    env_file: [.env.node.generated]
+    ports:
+      - "8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
