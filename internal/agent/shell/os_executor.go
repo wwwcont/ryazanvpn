@@ -40,6 +40,7 @@ func (e *OSExecutor) Run(ctx context.Context, req ExecRequest) (ExecResult, erro
 	res := ExecResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
+		ExitCode: -1,
 		Duration: dur,
 	}
 
@@ -54,6 +55,7 @@ func (e *OSExecutor) Run(ctx context.Context, req ExecRequest) (ExecResult, erro
 			slog.String("work_dir", req.WorkDir),
 			slog.Int("exit_code", res.ExitCode),
 			slog.Duration("duration", res.Duration),
+			slog.Any("error", err),
 		)
 	}
 
