@@ -17,6 +17,7 @@ import (
 type IssueDeviceConfigInput struct {
 	DeviceAccessID   string
 	DevicePrivateKey string
+	DevicePublicKey  string
 	ServerPublicKey  string
 	PresharedKey     string
 	AssignedIP       string
@@ -25,6 +26,7 @@ type IssueDeviceConfigInput struct {
 	EndpointPort     int
 	Keepalive        int
 	AllowedIPs       []string
+	AWG              DefaultVPNAWGFields
 	TokenTTL         time.Duration
 }
 
@@ -57,6 +59,7 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 
 	cfg, err := uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{
 		DevicePrivateKey: in.DevicePrivateKey,
+		DevicePublicKey:  in.DevicePublicKey,
 		ServerPublicKey:  in.ServerPublicKey,
 		PresharedKey:     in.PresharedKey,
 		AssignedIP:       in.AssignedIP,
@@ -65,6 +68,7 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		EndpointPort:     in.EndpointPort,
 		Keepalive:        in.Keepalive,
 		AllowedIPs:       in.AllowedIPs,
+		AWG:              in.AWG,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "missing required fields") {

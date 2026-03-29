@@ -19,6 +19,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/infra/nodeclient"
 	pgrepo "github.com/wwwcont/ryazanvpn/internal/infra/repository/postgres"
 	"github.com/wwwcont/ryazanvpn/internal/infra/telegram"
+	"github.com/wwwcont/ryazanvpn/internal/infra/vpnkey"
 	"github.com/wwwcont/ryazanvpn/internal/transport/httpcontrol"
 )
 
@@ -113,9 +114,28 @@ func main() {
 						Renderer:  configrenderer.NewAmneziaWGRenderer(),
 						Encryptor: encryptor,
 					},
-					ServerPublicKey:    cfg.VPNServerPublicKey,
-					PublicEndpoint:     cfg.VPNServerPublicEndpoint,
-					ClientAllowedIPs:   cfg.VPNClientAllowedIPs,
+					ServerPublicKey:  cfg.VPNServerPublicKey,
+					PublicEndpoint:   cfg.VPNServerPublicEndpoint,
+					ClientAllowedIPs: cfg.VPNClientAllowedIPs,
+					AWG: app.DefaultVPNAWGFields{
+						Jc:   cfg.VPNAWGJc,
+						Jmin: cfg.VPNAWGJmin,
+						Jmax: cfg.VPNAWGJmax,
+						S1:   cfg.VPNAWGS1,
+						S2:   cfg.VPNAWGS2,
+						S3:   cfg.VPNAWGS3,
+						S4:   cfg.VPNAWGS4,
+						H1:   cfg.VPNAWGH1,
+						H2:   cfg.VPNAWGH2,
+						H3:   cfg.VPNAWGH3,
+						H4:   cfg.VPNAWGH4,
+						I1:   cfg.VPNAWGI1,
+						I2:   cfg.VPNAWGI2,
+						I3:   cfg.VPNAWGI3,
+						I4:   cfg.VPNAWGI4,
+						I5:   cfg.VPNAWGI5,
+						MTU:  cfg.VPNAWGMTU,
+					},
 					SensitiveEncryptor: encryptor,
 				},
 				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: auditRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeAppClient}},
@@ -130,7 +150,28 @@ func main() {
 				Traffic:         trafficRepo,
 				DownloadBaseURL: cfg.PublicBaseURL,
 				AdminIDs:        adminIDs,
+				VPNSubnetCIDR:   cfg.VPNSubnetCIDR,
 				ConfigEncryptor: encryptor,
+				VPNExporter:     vpnkey.NewDefaultVPNExporter(),
+				DefaultVPNAWG: app.DefaultVPNAWGFields{
+					Jc:   cfg.VPNAWGJc,
+					Jmin: cfg.VPNAWGJmin,
+					Jmax: cfg.VPNAWGJmax,
+					S1:   cfg.VPNAWGS1,
+					S2:   cfg.VPNAWGS2,
+					S3:   cfg.VPNAWGS3,
+					S4:   cfg.VPNAWGS4,
+					H1:   cfg.VPNAWGH1,
+					H2:   cfg.VPNAWGH2,
+					H3:   cfg.VPNAWGH3,
+					H4:   cfg.VPNAWGH4,
+					I1:   cfg.VPNAWGI1,
+					I2:   cfg.VPNAWGI2,
+					I3:   cfg.VPNAWGI3,
+					I4:   cfg.VPNAWGI4,
+					I5:   cfg.VPNAWGI5,
+					MTU:  cfg.VPNAWGMTU,
+				},
 			}
 			telegramWebhookHandler = telegram.WebhookHandler{SecretToken: cfg.TelegramWebhookSecret, Service: tgSvc}
 		}

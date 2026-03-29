@@ -47,6 +47,23 @@ type Config struct {
 	VPNServerPublicEndpoint string
 	VPNServerPublicKey      string
 	VPNClientAllowedIPs     []string
+	VPNAWGJc                int
+	VPNAWGJmin              int
+	VPNAWGJmax              int
+	VPNAWGS1                int
+	VPNAWGS2                int
+	VPNAWGS3                int
+	VPNAWGS4                int
+	VPNAWGH1                string
+	VPNAWGH2                string
+	VPNAWGH3                string
+	VPNAWGH4                string
+	VPNAWGI1                string
+	VPNAWGI2                string
+	VPNAWGI3                string
+	VPNAWGI4                string
+	VPNAWGI5                string
+	VPNAWGMTU               int
 	TelegramBotToken        string
 	TelegramWebhookSecret   string
 	PublicBaseURL           string
@@ -93,6 +110,23 @@ func LoadConfig(serviceName string) (Config, error) {
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
 		VPNServerPublicKey:      envOrDefault("VPN_SERVER_PUBLIC_KEY", ""),
 		VPNClientAllowedIPs:     csvListFromEnvOrDefault("VPN_CLIENT_ALLOWED_IPS", []string{"0.0.0.0/0", "::/0"}),
+		VPNAWGJc:                intFromEnv("VPN_AWG_JC", 4),
+		VPNAWGJmin:              intFromEnv("VPN_AWG_JMIN", 10),
+		VPNAWGJmax:              intFromEnv("VPN_AWG_JMAX", 50),
+		VPNAWGS1:                intFromEnv("VPN_AWG_S1", 50),
+		VPNAWGS2:                intFromEnv("VPN_AWG_S2", 74),
+		VPNAWGS3:                intFromEnv("VPN_AWG_S3", 45),
+		VPNAWGS4:                intFromEnv("VPN_AWG_S4", 16),
+		VPNAWGH1:                envOrDefault("VPN_AWG_H1", "1391505721-1463481553"),
+		VPNAWGH2:                envOrDefault("VPN_AWG_H2", "1725378175-1834354614"),
+		VPNAWGH3:                envOrDefault("VPN_AWG_H3", "2076643873-2118219660"),
+		VPNAWGH4:                envOrDefault("VPN_AWG_H4", "2141781406-2147031473"),
+		VPNAWGI1:                envOrDefault("VPN_AWG_I1", "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"),
+		VPNAWGI2:                envOrDefault("VPN_AWG_I2", ""),
+		VPNAWGI3:                envOrDefault("VPN_AWG_I3", ""),
+		VPNAWGI4:                envOrDefault("VPN_AWG_I4", ""),
+		VPNAWGI5:                envOrDefault("VPN_AWG_I5", ""),
+		VPNAWGMTU:               intFromEnv("VPN_AWG_MTU", 1376),
 		TelegramBotToken:        os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramWebhookSecret:   os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
 		PublicBaseURL:           envOrDefault("PUBLIC_BASE_URL", "http://localhost:8080"),

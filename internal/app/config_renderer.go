@@ -2,6 +2,7 @@ package app
 
 type RenderAmneziaWGInput struct {
 	DevicePrivateKey string
+	DevicePublicKey  string
 	ServerPublicKey  string
 	PresharedKey     string
 	AssignedIP       string
@@ -10,6 +11,7 @@ type RenderAmneziaWGInput struct {
 	EndpointPort     int
 	Keepalive        int
 	AllowedIPs       []string
+	AWG              DefaultVPNAWGFields
 }
 
 type ConfigRenderer interface {

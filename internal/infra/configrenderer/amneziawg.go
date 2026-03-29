@@ -51,6 +51,24 @@ func (r *AmneziaWGRenderer) RenderAmneziaWG(in app.RenderAmneziaWGInput) (string
 PrivateKey = %s
 Address = %s
 DNS = %s
+MTU = %d
+Jc = %d
+Jmin = %d
+Jmax = %d
+S1 = %d
+S2 = %d
+S3 = %d
+S4 = %d
+H1 = %s
+H2 = %s
+H3 = %s
+H4 = %s
+I1 = %s
+I2 = %s
+I3 = %s
+I4 = %s
+I5 = %s
+ClientId = %s
 
 [Peer]
 PublicKey = %s
@@ -62,6 +80,24 @@ PersistentKeepalive = %d
 		in.DevicePrivateKey,
 		in.AssignedIP,
 		strings.Join(in.DNS, ", "),
+		defaultInt(in.AWG.MTU, 1376),
+		in.AWG.Jc,
+		in.AWG.Jmin,
+		in.AWG.Jmax,
+		in.AWG.S1,
+		in.AWG.S2,
+		in.AWG.S3,
+		in.AWG.S4,
+		in.AWG.H1,
+		in.AWG.H2,
+		in.AWG.H3,
+		in.AWG.H4,
+		in.AWG.I1,
+		in.AWG.I2,
+		in.AWG.I3,
+		in.AWG.I4,
+		in.AWG.I5,
+		in.DevicePublicKey,
 		in.ServerPublicKey,
 		in.PresharedKey,
 		in.EndpointHost,
@@ -70,4 +106,11 @@ PersistentKeepalive = %d
 		in.Keepalive,
 	)
 	return cfg, nil
+}
+
+func defaultInt(v, fallback int) int {
+	if v <= 0 {
+		return fallback
+	}
+	return v
 }
