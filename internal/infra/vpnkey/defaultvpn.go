@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
+	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
 const defaultVPNPrefix = "vpn://"
@@ -116,9 +117,13 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 	if port <= 0 {
 		port = parsed.EndpointPort
 	}
-	clientPublicKey := strings.TrimSpace(in.ClientPublicKey)
-	if clientPublicKey == "" {
-		return "", fmt.Errorf("missing client public key")
+	derivedPublicKey, err := wgkeys.DerivePublicKey(parsed.ClientPrivateKey)
+	if err != nil {
+		return "", fmt.Errorf("derive client public key: %w", err)
+	}
+	clientPublicKey := derivedPublicKey
+	if provided := strings.TrimSpace(in.ClientPublicKey); provided != "" && provided != derivedPublicKey {
+		return "", fmt.Errorf("client key mismatch: provided public key does not match config private key")
 	}
 
 	clientIP := stripCIDRSuffix(parsed.ClientIP)

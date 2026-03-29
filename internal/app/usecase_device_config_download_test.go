@@ -18,7 +18,8 @@ func TestIssueAndDownloadDeviceConfig(t *testing.T) {
 	issue := IssueDeviceConfig{Accesses: accessRepo, Tokens: tokenRepo, Renderer: fakeRenderer{}, Encryptor: encrypt, Now: func() time.Time { return now }}
 	issued, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
 		DeviceAccessID:   "a1",
-		DevicePrivateKey: "priv",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
 		ServerPublicKey:  "srv",
 		AssignedIP:       "10.0.0.2/32",
 		EndpointHost:     "example.com",
@@ -38,6 +39,26 @@ func TestIssueAndDownloadDeviceConfig(t *testing.T) {
 	}
 	if cfg == "" {
 		t.Fatal("empty config")
+	}
+}
+
+func TestIssueDeviceConfig_RejectsMismatchedPublicKey(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	issue := IssueDeviceConfig{Accesses: accessRepo, Tokens: &cfgTokenRepo{}, Renderer: fakeRenderer{}, Encryptor: fakeEncryptor{}, Now: func() time.Time { return now }}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "KS3O5dK5fty5waMzWBFE92ovd3xpOEOEY6P2j84a+Cg=",
+		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+	})
+	if err == nil {
+		t.Fatal("expected key mismatch error")
 	}
 }
 
