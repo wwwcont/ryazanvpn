@@ -66,13 +66,13 @@ func TestInviteCodeActivatesAndIssuesToken(t *testing.T) {
 		States:           state,
 		RegisterUC:       fakeRegister{u: &user.User{ID: "u1"}},
 		ActivateInviteUC: fakeActivate{},
-		GetGrantUC: &fakeGetGrant{grant: nil, afterActivate: &accessgrant.AccessGrant{ID: "g1", UserID: "u1", Status: accessgrant.StatusActive,
+		GetGrantUC: &fakeGetGrant{grant: &accessgrant.AccessGrant{ID: "g1", UserID: "u1", Status: accessgrant.StatusActive,
 			ExpiresAt: time.Now().Add(24 * time.Hour)}},
 		CreateDeviceUC:  fakeCreateDevice{out: &app.CreateDeviceForUserOutput{Access: &access.DeviceAccess{ID: "a1"}}},
 		Devices:         &fakeDevices{activeErr: device.ErrNotFound},
 		Accesses:        accRepo,
 		Tokens:          tokRepo,
-		AccessGrants:    &fakeAccessGrantRepo{latest: &accessgrant.AccessGrant{Status: accessgrant.StatusActive}},
+		AccessGrants:    &fakeAccessGrantRepo{latest: nil},
 		DownloadBaseURL: "https://vpn.example.com",
 		TokenTTL:        10 * time.Minute,
 	}
@@ -218,6 +218,9 @@ func (f *fakeAccesses) SetConfigBlobEncrypted(ctx context.Context, id string, bl
 func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{}, nil
 }
+func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
 
 type fakeTokens struct{ created []token.CreateParams }
 
@@ -229,3 +232,12 @@ func (f *fakeTokens) GetByTokenHash(ctx context.Context, tokenHash string) (*tok
 	return nil, errors.New("not implemented")
 }
 func (f *fakeTokens) MarkUsed(ctx context.Context, id string, consumedAt time.Time) error { return nil }
+
+func TestRandIntNRange(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		v := randIntN(10000)
+		if v < 0 || v >= 10000 {
+			t.Fatalf("randIntN out of range: %d", v)
+		}
+	}
+}

@@ -679,7 +679,7 @@ func randIntN(n int) int {
 	}
 	var b [2]byte
 	_, _ = rand.Read(b[:])
-	return int(b[0])<<8 | int(b[1])%n
+	return (int(b[0])<<8 | int(b[1])) % n
 }
 
 func minInt(a, b int) int {
