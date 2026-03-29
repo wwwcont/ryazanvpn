@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
@@ -61,6 +61,8 @@ type Options struct {
 	AuditLogs         AuditLogger
 	TelegramWebhook   http.Handler
 }
+
+var inviteCodePattern = regexp.MustCompile(`^\d{4}$`)
 
 func NewRouter(opts Options) http.Handler {
 	r := chi.NewRouter()
@@ -187,6 +189,9 @@ func NewRouter(opts Options) http.Handler {
 			code := strings.TrimSpace(req.Code)
 			if code == "" {
 				code = generateInviteCode()
+			} else if !inviteCodePattern.MatchString(code) {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "code must be exactly 4 digits"})
+				return
 			}
 
 			maxActivations := 1
@@ -292,12 +297,12 @@ func adminAuthMiddleware(headerName, secret string) func(http.Handler) http.Hand
 }
 
 func generateInviteCode() string {
-	var b [3]byte
+	var b [2]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+		return fmt.Sprintf("%04d", time.Now().UnixNano()%10_000)
 	}
-	n := int(b[0])<<16 | int(b[1])<<8 | int(b[2])
-	return fmt.Sprintf("%06d", n%1_000_000)
+	n := int(b[0])<<8 | int(b[1])
+	return fmt.Sprintf("%04d", n%10_000)
 }
 
 type adminAuditInput struct {
