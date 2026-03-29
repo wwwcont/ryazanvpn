@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ func (r *AmneziaDockerRuntime) Health(ctx context.Context) error {
 	if r.exec == nil {
 		return errors.New("shell executor is nil")
 	}
+	r.resolveDockerBinaryPath()
 	if strings.TrimSpace(r.cfg.DockerBinaryPath) == "" {
 		return errors.New("docker binary path is empty")
 	}
@@ -74,6 +76,25 @@ func (r *AmneziaDockerRuntime) Health(ctx context.Context) error {
 		slog.String("interface", r.cfg.InterfaceName),
 	)
 	return nil
+}
+
+func (r *AmneziaDockerRuntime) resolveDockerBinaryPath() {
+	current := strings.TrimSpace(r.cfg.DockerBinaryPath)
+	if current != "" && strings.ContainsRune(current, '/') {
+		if path, err := exec.LookPath(current); err == nil {
+			r.cfg.DockerBinaryPath = path
+			return
+		}
+	}
+	if path, err := exec.LookPath("docker"); err == nil {
+		if current != path {
+			r.log("runtime.amnezia_docker.health.docker_path_resolved",
+				slog.String("configured", current),
+				slog.String("resolved", path),
+			)
+		}
+		r.cfg.DockerBinaryPath = path
+	}
 }
 
 func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationRequest) (OperationResult, error) {

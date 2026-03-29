@@ -25,7 +25,7 @@
 - `RUNTIME_ADAPTER=amnezia_docker`
 - `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
 - `AMNEZIA_INTERFACE_NAME=awg0`
-- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `DOCKER_BINARY_PATH=docker`
 
 ---
 
