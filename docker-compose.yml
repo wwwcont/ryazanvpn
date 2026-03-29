@@ -61,12 +61,11 @@ services:
         SERVICE: cmd/node-agent
     restart: unless-stopped
     env_file: [.env.single.generated]
-    environment:
-      HTTP_ADDR: :8081
     ports:
       - "8081:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
 
   #caddy:
   #  image: caddy:2-alpine
