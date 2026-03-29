@@ -62,19 +62,19 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    env_file: [.env.single.generated]
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - control-plane
+  #caddy:
+  #  image: caddy:2-alpine
+  #  restart: unless-stopped
+  #  env_file: [.env.single.generated]
+  #  ports:
+  #    - "80:80"
+  #    - "443:443"
+  #  volumes:
+  #    - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #    - caddy_data:/data
+  #    - caddy_config:/config
+  #  depends_on:
+  #    - control-plane
 
 volumes:
   postgres_data:
