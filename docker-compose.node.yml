@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: deploy/amneziawg-go/Dockerfile
-    container_name: ${AMNEZIA_CONTAINER_NAME:-amnezia-awg2}
+    container_name: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
@@ -13,21 +13,23 @@ services:
       - net.ipv6.conf.all.forwarding=1
     environment:
       - TZ=${TZ:-UTC}
-      - AMNEZIA_INTERFACE_NAME=${AMNEZIA_INTERFACE_NAME:-awg0}
+      - AMNEZIA_INTERFACE_NAME=${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
+      - AMNEZIA_CONFIG_DIR=/etc/amnezia
+      - AMNEZIA_KEEP_INTERFACE_UP=1
     volumes:
       - node_amnezia_data:/var/lib/amnezia
       - ./deploy/node/amnezia:/etc/amnezia:rw
     healthcheck:
-      test: ["CMD-SHELL", "awg show ${AMNEZIA_INTERFACE_NAME:-awg0} >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "awg show ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required} >/dev/null 2>&1"]
       interval: 20s
       timeout: 5s
       retries: 5
 
   xray:
-    image: ghcr.io/xtls/xray-core:latest
-    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
+    image: teddysun/xray:1.8.24
+    container_name: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
     restart: unless-stopped
-    command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    command: ["run", "-config", "/etc/xray/config.json"]
     environment:
       - TZ=${TZ:-UTC}
     volumes:
@@ -35,7 +37,7 @@ services:
       - node_xray_data:/var/lib/xray
       - node_xray_logs:/var/log/xray
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f xray >/dev/null"]
+      test: ["CMD", "xray", "version"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -47,6 +49,14 @@ services:
         SERVICE: cmd/node-agent
     restart: unless-stopped
     env_file: [.env.node.generated]
+    environment:
+      NODE_AGENT_HTTP_ADDR: ${NODE_AGENT_HTTP_ADDR:-:8081}
+      HTTP_ADDR: ${NODE_AGENT_HTTP_ADDR:-:8081}
+      RUNTIME_ADAPTER: ${RUNTIME_ADAPTER:-amnezia_docker}
+      DOCKER_BINARY_PATH: ${DOCKER_BINARY_PATH:-docker}
+      AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
+      AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
+      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
     depends_on:
       amnezia-awg:
         condition: service_started
@@ -56,7 +66,6 @@ services:
       - "8081:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /usr/bin/docker:/usr/bin/docker:ro
       - ./deploy/node:/etc/ryazanvpn/node:rw
 
 volumes:
