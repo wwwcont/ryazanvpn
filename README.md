@@ -132,3 +132,47 @@ scripts/dev-single.sh down
 - `Показать текст` — fallback с текстом конфига.
 
 `/download/config/{token}` остаётся доступным для совместимости и внешнего download flow.
+
+## Self-contained node stack (production model)
+
+Node host runs only repository-managed services:
+- `node-agent`
+- `amnezia-awg` runtime container (Speed)
+- `xray` runtime container (Health)
+
+Start with:
+
+```bash
+cp deploy/env/node.env.example .env.node.generated
+./scripts/bootstrap-node.sh
+```
+
+Important:
+- node-agent is the single runtime controller;
+- do not use desktop Amnezia GUI on server hosts;
+- no manual peer/client edits in runtime containers.
+
+## Быстрый деплой: все сервисы на одной ноде
+
+```bash
+cp deploy/env/single-server.env.example .env.single.generated
+# заполните секреты и XRAY_REALITY_PRIVATE_KEY
+docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build
+docker compose --env-file .env.single.generated -f docker-compose.single.yml ps
+```
+
+Подробно: `docs/runbooks/single-server-deploy.md`.
+
+## Быстрый деплой: подключение дополнительной ноды к главной
+
+На дополнительной ноде:
+
+```bash
+git clone <YOUR_REPO_URL> ryazanvpn
+cd ryazanvpn
+./scripts/bootstrap-node.sh
+# заполните .env.node.generated (NODE_ID/NODE_TOKEN/CONTROL_PLANE_BASE_URL/AGENT_HMAC_SECRET)
+docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build
+```
+
+Подробно: `docs/runbooks/add-node.md`.

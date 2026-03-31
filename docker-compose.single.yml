@@ -57,6 +57,40 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  amnezia-awg:
+    image: ghcr.io/amnezia-vpn/amneziawg:latest
+    container_name: ${AMNEZIA_CONTAINER_NAME:-amnezia-awg2}
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+    volumes:
+      - single_amnezia_data:/var/lib/amnezia
+      - ./deploy/node/amnezia:/etc/amnezia:rw
+    healthcheck:
+      test: ["CMD-SHELL", "awg show ${AMNEZIA_INTERFACE_NAME:-awg0} >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  xray:
+    image: teddysun/xray:latest
+    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
+    restart: unless-stopped
+    command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    volumes:
+      - ./deploy/node/xray/config.json:/etc/xray/config.json:ro
+      - single_xray_data:/var/lib/xray
+      - single_xray_logs:/var/log/xray
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f xray >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
   node-agent:
     build:
       context: .
@@ -71,10 +105,20 @@ services:
       RUNTIME_ADAPTER: ${RUNTIME_ADAPTER}
       AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME}
       AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME}
+      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME}
     ports:
       - "8081:8081"
+    depends_on:
+      amnezia-awg:
+        condition: service_started
+      xray:
+        condition: service_started
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
 
 volumes:
   postgres_data:
+  single_amnezia_data:
+  single_xray_data:
+  single_xray_logs:

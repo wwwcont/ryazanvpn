@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 )
@@ -37,4 +38,29 @@ func (a MinLoadNodeAssigner) Assign(nodes []*node.Node) (*node.Node, error) {
 		}
 	}
 	return best, nil
+}
+
+func nodeSupportsProtocol(n *node.Node, protocol string) bool {
+	if n == nil || strings.TrimSpace(protocol) == "" {
+		return false
+	}
+	raw, ok := n.RuntimeMetadata["protocols_supported"]
+	if !ok {
+		return protocol == "wireguard"
+	}
+	switch v := raw.(type) {
+	case []string:
+		for _, item := range v {
+			if strings.EqualFold(strings.TrimSpace(item), protocol) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.EqualFold(strings.TrimSpace(s), protocol) {
+				return true
+			}
+		}
+	}
+	return false
 }

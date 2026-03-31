@@ -78,6 +78,7 @@ type NodeAgentOperationRequest struct {
 
 type NodeTrafficCounter struct {
 	DeviceAccessID  string
+	Protocol        string
 	PeerPublicKey   string
 	AllowedIP       string
 	Endpoint        string

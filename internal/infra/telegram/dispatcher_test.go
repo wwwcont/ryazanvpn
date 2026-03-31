@@ -51,8 +51,8 @@ func TestEnterCodePutsIntoAwaitState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.State != StateAwaitInvite {
-		t.Fatalf("expected %s, got %s", StateAwaitInvite, st.State)
+	if st.State != StateAwaitingInviteCode {
+		t.Fatalf("expected %s, got %s", StateAwaitingInviteCode, st.State)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestInviteCodeActivatesAndSendsDocument(t *testing.T) {
 		ConfigEncryptor: fakeEncryptor{},
 	}
 
-	_ = state.Set(context.Background(), 301, StateAwaitInvite)
+	_ = state.Set(context.Background(), 301, StateAwaitingInviteCode)
 	svc.HandleUpdate(context.Background(), Update{Message: &Message{Text: "1234", From: User{ID: 301}, Chat: Chat{ID: 301}}})
 
 	if len(bot.messages) == 0 {
@@ -189,6 +189,12 @@ func (f *fakeDevices) Create(ctx context.Context, in device.CreateParams) (*devi
 func (f *fakeDevices) ListByUserID(ctx context.Context, userID string) ([]*device.Device, error) {
 	return []*device.Device{}, nil
 }
+func (f *fakeDevices) GetByID(ctx context.Context, id string) (*device.Device, error) {
+	if f.active != nil && f.active.ID == id {
+		return f.active, nil
+	}
+	return nil, device.ErrNotFound
+}
 func (f *fakeDevices) GetActiveByUserID(ctx context.Context, userID string) (*device.Device, error) {
 	if f.activeErr != nil {
 		return nil, f.activeErr
@@ -223,11 +229,15 @@ func (f *fakeAccesses) MarkError(ctx context.Context, id string, failedAt time.T
 func (f *fakeAccesses) SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error {
 	return nil
 }
+func (f *fakeAccesses) ClearConfigBlobEncrypted(ctx context.Context, id string) error { return nil }
 func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{}, nil
 }
 func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
+}
+func (f *fakeAccesses) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
+	return nil, nil
 }
 
 type fakeEncryptor struct{}

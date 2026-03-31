@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 )
 
 type ConfigDownloadTokenRepository struct {
@@ -64,6 +64,19 @@ WHERE id = $1`
 		return token.ErrNotFound
 	}
 	return nil
+}
+
+func (r *ConfigDownloadTokenRepository) RevokeIssuedByAccessID(ctx context.Context, deviceAccessID string, revokedAt time.Time) error {
+	const query = `
+UPDATE config_download_tokens
+SET status = 'revoked', updated_at = NOW()
+WHERE device_access_id = $1
+  AND status = 'issued'
+  AND (used_at IS NULL)
+  AND expires_at >= $2`
+
+	_, err := r.q.Exec(ctx, query, deviceAccessID, revokedAt)
+	return err
 }
 
 func scanToken(row pgx.Row) (*token.ConfigDownloadToken, error) {

@@ -1,4 +1,42 @@
 services:
+  amnezia-awg:
+    image: ghcr.io/amnezia-vpn/amneziawg:latest
+    container_name: ${AMNEZIA_CONTAINER_NAME:-amnezia-awg2}
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - node_amnezia_data:/var/lib/amnezia
+      - ./deploy/node/amnezia:/etc/amnezia:rw
+    healthcheck:
+      test: ["CMD-SHELL", "awg show ${AMNEZIA_INTERFACE_NAME:-awg0} >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  xray:
+    image: teddysun/xray:latest
+    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
+    restart: unless-stopped
+    command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    environment:
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./deploy/node/xray/config.json:/etc/xray/config.json:ro
+      - node_xray_data:/var/lib/xray
+      - node_xray_logs:/var/log/xray
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f xray >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
   node-agent:
     build:
       context: .
@@ -6,8 +44,19 @@ services:
         SERVICE: cmd/node-agent
     restart: unless-stopped
     env_file: [.env.node.generated]
+    depends_on:
+      amnezia-awg:
+        condition: service_started
+      xray:
+        condition: service_started
     ports:
       - "8081:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
+      - ./deploy/node:/etc/ryazanvpn/node:rw
+
+volumes:
+  node_amnezia_data:
+  node_xray_data:
+  node_xray_logs:

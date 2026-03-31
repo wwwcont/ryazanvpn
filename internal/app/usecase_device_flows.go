@@ -17,10 +17,12 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/device"
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
 var ErrUserAlreadyHasActiveDevice = errors.New("user already has active device")
+var ErrInsufficientBalance = errors.New("insufficient balance")
 
 type CreateDeviceForUserInput struct {
 	UserID   string
@@ -31,12 +33,15 @@ type CreateDeviceForUserInput struct {
 type CreateDeviceForUserOutput struct {
 	Device              *device.Device
 	Access              *access.DeviceAccess
+	AccessByProtocol    map[string]*access.DeviceAccess
 	PrivateKey          string
 	Node                *node.Node
 	ConfigDownloadToken string
+	ConfigTokens        map[string]string
 }
 
 type CreateDeviceForUser struct {
+	Users              UserRepository
 	Devices            DeviceRepository
 	Nodes              NodeRepository
 	Accesses           DeviceAccessRepository
@@ -62,6 +67,15 @@ type CreateDeviceForUser struct {
 }
 
 func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUserInput) (*CreateDeviceForUserOutput, error) {
+	if uc.Users != nil {
+		u, err := uc.Users.GetByID(ctx, in.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.EqualFold(u.Status, user.StatusBlocked) {
+			return nil, ErrInsufficientBalance
+		}
+	}
 	if existing, err := uc.Devices.GetActiveByUserID(ctx, in.UserID); err == nil && existing != nil {
 		return nil, ErrUserAlreadyHasActiveDevice
 	} else if err != nil && !errors.Is(err, device.ErrNotFound) {
@@ -130,6 +144,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	createdAccess, err := uc.Accesses.Create(ctx, access.CreateParams{
 		DeviceID:   createdDevice.ID,
 		VPNNodeID:  selectedNode.ID,
+		Protocol:   "wireguard",
 		Status:     access.StatusPending,
 		AssignedIP: &assignedIP,
 	})
@@ -137,6 +152,16 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		return nil, err
 	}
 	slog.Info("device access created", "device_id", createdDevice.ID, "access_id", createdAccess.ID, "assigned_ip", assignedIP)
+	createdXrayAccess, err := uc.Accesses.Create(ctx, access.CreateParams{
+		DeviceID:   createdDevice.ID,
+		VPNNodeID:  selectedNode.ID,
+		Protocol:   "xray",
+		Status:     access.StatusPending,
+		AssignedIP: &assignedIP,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"device_id":     createdDevice.ID,
@@ -160,6 +185,28 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 
 	if uc.CreatePeerExecutor != nil {
 		if err := uc.CreatePeerExecutor.Execute(ctx, op.ID); err != nil {
+			return nil, err
+		}
+	}
+	xrayPayload, _ := json.Marshal(map[string]any{
+		"device_id":   createdDevice.ID,
+		"access_id":   createdXrayAccess.ID,
+		"public_key":  publicKey,
+		"assigned_ip": assignedIP,
+		"protocol":    "xray",
+		"keepalive":   0,
+	})
+	xrayOp, err := uc.Operations.Create(ctx, operation.CreateParams{
+		VPNNodeID:     selectedNode.ID,
+		OperationType: operation.TypeCreatePeer,
+		Status:        operation.StatusQueued,
+		PayloadJSON:   string(xrayPayload),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if uc.CreatePeerExecutor != nil {
+		if err := uc.CreatePeerExecutor.Execute(ctx, xrayOp.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -191,9 +238,11 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	}
 	serverPublicKey := valueOrDefault(uc.ServerPublicKey, selectedNode.ServerPublicKey)
 	issuedToken := ""
+	issuedTokens := map[string]string{}
 	if uc.ConfigIssuer != nil {
 		cfgOut, err := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
 			DeviceAccessID:   createdAccess.ID,
+			Protocol:         "wireguard",
 			DevicePrivateKey: privateKey,
 			DevicePublicKey:  publicKey,
 			ServerPublicKey:  serverPublicKey,
@@ -212,9 +261,38 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			return nil, err
 		}
 		issuedToken = cfgOut.Token
+		issuedTokens["wireguard"] = cfgOut.Token
+		xrayCfgOut, xErr := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
+			DeviceAccessID:   createdXrayAccess.ID,
+			Protocol:         "xray",
+			DevicePrivateKey: privateKey,
+			DevicePublicKey:  publicKey,
+			ServerPublicKey:  serverPublicKey,
+			PresharedKey:     presharedKey,
+			AssignedIP:       assignedIP,
+			MTU:              uc.MTU,
+			DNS:              uc.DNS,
+			EndpointHost:     valueOrDefault(uc.EndpointHost, vpnHost),
+			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, vpnPort),
+			Keepalive:        0,
+			AllowedIPs:       uc.ClientAllowedIPs,
+			AWG:              uc.DefaultVPNAWG,
+			TokenTTL:         uc.TokenTTL,
+		})
+		if xErr == nil {
+			issuedTokens["xray"] = xrayCfgOut.Token
+		}
 	}
 
-	return &CreateDeviceForUserOutput{Device: createdDevice, Access: createdAccess, PrivateKey: privateKey, Node: selectedNode, ConfigDownloadToken: issuedToken}, nil
+	return &CreateDeviceForUserOutput{
+		Device:              createdDevice,
+		Access:              createdAccess,
+		AccessByProtocol:    map[string]*access.DeviceAccess{"wireguard": createdAccess, "xray": createdXrayAccess},
+		PrivateKey:          privateKey,
+		Node:                selectedNode,
+		ConfigDownloadToken: issuedToken,
+		ConfigTokens:        issuedTokens,
+	}, nil
 }
 
 func (uc CreateDeviceForUser) generatePresharedKey(ctx context.Context) (string, error) {
@@ -267,6 +345,7 @@ func (uc CreateDeviceAccess) Execute(ctx context.Context, in CreateDeviceAccessI
 	return uc.Accesses.Create(ctx, access.CreateParams{
 		DeviceID:   in.DeviceID,
 		VPNNodeID:  in.VPNNodeID,
+		Protocol:   "wireguard",
 		Status:     access.StatusPending,
 		AssignedIP: &ip,
 	})
@@ -278,8 +357,10 @@ type RevokeDeviceAccessInput struct {
 
 type RevokeDeviceAccess struct {
 	Accesses           DeviceAccessRepository
+	Devices            DeviceRepository
 	Operations         NodeOperationRepository
 	AuditLogs          AuditLogRepository
+	Tokens             ConfigDownloadTokenRepository
 	RevokePeerExecutor *ExecuteRevokePeerOperation
 }
 
@@ -289,7 +370,19 @@ func (uc RevokeDeviceAccess) Execute(ctx context.Context, in RevokeDeviceAccessI
 		return err
 	}
 
-	payload, _ := json.Marshal(map[string]any{"access_id": accessEntry.ID, "device_id": accessEntry.DeviceID})
+	peerPublicKey := ""
+	if uc.Devices != nil {
+		if d, dErr := uc.Devices.GetByID(ctx, accessEntry.DeviceID); dErr == nil && d != nil {
+			peerPublicKey = d.PublicKey
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"access_id":        accessEntry.ID,
+		"device_id":        accessEntry.DeviceID,
+		"device_access_id": accessEntry.ID,
+		"protocol":         accessEntry.Protocol,
+		"peer_public_key":  peerPublicKey,
+	})
 	op, err := uc.Operations.Create(ctx, operation.CreateParams{
 		VPNNodeID:     accessEntry.VPNNodeID,
 		OperationType: operation.TypeRevokePeer,
@@ -304,6 +397,14 @@ func (uc RevokeDeviceAccess) Execute(ctx context.Context, in RevokeDeviceAccessI
 		if err := uc.RevokePeerExecutor.Execute(ctx, op.ID, accessEntry.ID); err != nil {
 			return err
 		}
+	}
+	if uc.Tokens != nil {
+		if err := uc.Tokens.RevokeIssuedByAccessID(ctx, accessEntry.ID, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	if err := uc.Accesses.ClearConfigBlobEncrypted(ctx, accessEntry.ID); err != nil {
+		return err
 	}
 
 	details, _ := json.Marshal(map[string]any{"access_id": accessEntry.ID, "operation_id": op.ID})

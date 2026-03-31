@@ -14,6 +14,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/operation"
+	"github.com/wwwcont/ryazanvpn/internal/domain/token"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
@@ -190,13 +191,20 @@ func TestCreateDeviceForUser_PeerPayloadUsesDerivedPublicKey(t *testing.T) {
 func TestRevokeDeviceAccess_Confirmed(t *testing.T) {
 	accessRepo := &fakeAccess{byID: &access.DeviceAccess{ID: "a1", DeviceID: "d1", VPNNodeID: "n1"}}
 	opRepo := &fakeOps{created: &operation.NodeOperation{ID: "op1"}}
-	uc := RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: &fakeAudit{}}
+	tokenRepo := &fakeTokens{}
+	uc := RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: &fakeAudit{}, Tokens: tokenRepo}
 
 	if err := uc.Execute(context.Background(), RevokeDeviceAccessInput{AccessID: "a1"}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if accessRepo.revoked {
 		t.Fatal("did not expect direct revoke without executor")
+	}
+	if !accessRepo.configCleared {
+		t.Fatal("expected config blob to be cleared")
+	}
+	if !tokenRepo.revoked {
+		t.Fatal("expected issued tokens to be revoked")
 	}
 }
 
@@ -370,6 +378,17 @@ func (f *fakeDevices) Create(ctx context.Context, in device.CreateParams) (*devi
 func (f *fakeDevices) ListByUserID(ctx context.Context, userID string) ([]*device.Device, error) {
 	return f.list, nil
 }
+func (f *fakeDevices) GetByID(ctx context.Context, id string) (*device.Device, error) {
+	if f.active != nil && f.active.ID == id {
+		return f.active, nil
+	}
+	for _, item := range f.list {
+		if item != nil && item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, device.ErrNotFound
+}
 func (f *fakeDevices) GetActiveByUserID(ctx context.Context, userID string) (*device.Device, error) {
 	if f.activeErr != nil {
 		return nil, f.activeErr
@@ -392,9 +411,10 @@ func (f *fakeNodes) UpdateHealth(ctx context.Context, id string, status string, 
 func (f *fakeNodes) UpdateLoad(ctx context.Context, id string, currentLoad int) error { return nil }
 
 type fakeAccess struct {
-	created *access.DeviceAccess
-	byID    *access.DeviceAccess
-	revoked bool
+	created       *access.DeviceAccess
+	byID          *access.DeviceAccess
+	revoked       bool
+	configCleared bool
 }
 
 func (f *fakeAccess) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
@@ -414,11 +434,32 @@ func (f *fakeAccess) MarkError(ctx context.Context, id string, failedAt time.Tim
 func (f *fakeAccess) SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error {
 	return nil
 }
+func (f *fakeAccess) ClearConfigBlobEncrypted(ctx context.Context, id string) error {
+	f.configCleared = true
+	return nil
+}
 func (f *fakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
 }
 func (f *fakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
+}
+func (f *fakeAccess) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
+	return nil, nil
+}
+
+type fakeTokens struct{ revoked bool }
+
+func (f *fakeTokens) Create(ctx context.Context, in token.CreateParams) (*token.ConfigDownloadToken, error) {
+	return nil, nil
+}
+func (f *fakeTokens) GetByTokenHash(ctx context.Context, tokenHash string) (*token.ConfigDownloadToken, error) {
+	return nil, token.ErrNotFound
+}
+func (f *fakeTokens) MarkUsed(ctx context.Context, id string, consumedAt time.Time) error { return nil }
+func (f *fakeTokens) RevokeIssuedByAccessID(ctx context.Context, deviceAccessID string, revokedAt time.Time) error {
+	f.revoked = true
+	return nil
 }
 
 type fakeOps struct {

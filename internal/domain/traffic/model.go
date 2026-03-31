@@ -6,12 +6,16 @@ import (
 )
 
 type DeviceTrafficSnapshot struct {
-	ID           string
-	DeviceID     string
-	CapturedAt   time.Time
-	RXTotalBytes int64
-	TXTotalBytes int64
-	CreatedAt    time.Time
+	ID              string
+	DeviceID        string
+	DeviceAccessID  *string
+	VPNNodeID       *string
+	Protocol        string
+	CapturedAt      time.Time
+	RXTotalBytes    int64
+	TXTotalBytes    int64
+	LastHandshakeAt *time.Time
+	CreatedAt       time.Time
 }
 
 type TrafficUsageDaily struct {
@@ -36,15 +40,22 @@ type Repository interface {
 }
 
 type CreateSnapshotParams struct {
-	DeviceID     string
-	CapturedAt   time.Time
-	RXTotalBytes int64
-	TXTotalBytes int64
+	DeviceID        string
+	DeviceAccessID  *string
+	VPNNodeID       *string
+	Protocol        string
+	CapturedAt      time.Time
+	RXTotalBytes    int64
+	TXTotalBytes    int64
+	LastHandshakeAt *time.Time
 }
 
 type AddDailyUsageDeltaParams struct {
 	DeviceID  string
+	VPNNodeID *string
+	Protocol  string
 	UsageDate time.Time
+	MonthDate time.Time
 	RXDelta   int64
 	TXDelta   int64
 }

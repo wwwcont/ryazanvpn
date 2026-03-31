@@ -40,6 +40,7 @@ type OperationResult struct {
 
 type PeerStat struct {
 	DeviceAccessID          string     `json:"device_access_id,omitempty"`
+	Protocol                string     `json:"protocol,omitempty"`
 	PeerPublicKey           string     `json:"peer_public_key,omitempty"`
 	PresharedKey            string     `json:"preshared_key,omitempty"`
 	Endpoint                string     `json:"endpoint,omitempty"`

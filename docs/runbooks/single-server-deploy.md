@@ -1,52 +1,74 @@
-# Runbook: single-server deploy
+# Runbook: развертывание на одной ноде (все сервисы на одном сервере)
 
-## 1) Подготовка env
+## Что поднимается
+
+`docker-compose.single.yml` запускает:
+1. `postgres`
+2. `redis`
+3. `migrate`
+4. `control-plane`
+5. `amnezia-awg`
+6. `xray`
+7. `node-agent`
+
+## Этап 1. Подготовка сервера
+
+```bash
+sudo apt update
+sudo apt install -y git docker.io docker-compose-plugin
+sudo systemctl enable --now docker
+```
+
+## Этап 2. Клонирование репы
+
+```bash
+git clone <YOUR_REPO_URL> ryazanvpn
+cd ryazanvpn
+```
+
+## Этап 3. Подготовка env
 
 ```bash
 cp deploy/env/single-server.env.example .env.single.generated
 ```
 
-Заполните секреты и проверьте ключевые значения:
-- `CONTROL_PLANE_HTTP_ADDR=:8080`
-- `NODE_AGENT_HTTP_ADDR=:8081`
-- `PUBLIC_BASE_URL=https://api.rznvpn.online`
-- `PUBLIC_DOMAIN=api.rznvpn.online`
-- `RUNTIME_ADAPTER=amnezia_docker`
-- `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
-- `AMNEZIA_INTERFACE_NAME=awg0`
-- `DOCKER_BINARY_PATH=/usr/bin/docker`
+Обязательно заполните:
+- `POSTGRES_PASSWORD`
+- `REDIS_PASSWORD`
+- `AGENT_HMAC_SECRET`
+- `NODE_AGENT_HMAC_SECRET`
+- `NODE_REGISTRATION_TOKEN`
+- `ADMIN_API_SECRET`
+- `CONFIG_MASTER_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `XRAY_REALITY_PRIVATE_KEY`
 
-## 2) Запуск стека
+## Этап 4. Запуск стека
 
 ```bash
 docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build
 ```
 
-Ожидаемый порядок:
-1. `postgres`
-2. `redis`
-3. `migrate`
-4. `control-plane`
-5. `node-agent`
-
-## 3) Проверка состояния
+## Этап 5. Проверки
 
 ```bash
+docker compose --env-file .env.single.generated -f docker-compose.single.yml ps
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 curl http://localhost:8081/health
 curl http://localhost:8081/ready
 ```
 
-Интерпретация:
-- `node-agent /health` может быть `degraded`, если runtime недоступен.
-- `node-agent /ready` возвращает `503`, если runtime недоступен.
-- При этом сам `node-agent` процесс остаётся жив и не должен уходить в crash loop.
-
-## 4) Telegram webhook
+## Этап 6. Telegram webhook
 
 ```bash
 curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "url=${PUBLIC_BASE_URL}/internal/telegram/webhook" \
   -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
 ```
+
+## Важно
+
+- Не управляйте runtime вручную через desktop Amnezia.
+- `node-agent` — единственный runtime controller для `amnezia-awg` и `xray`.

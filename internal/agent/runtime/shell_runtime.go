@@ -148,7 +148,11 @@ func parsePeerStatsOutput(out string) ([]PeerStat, error) {
 			t := time.Unix(ts, 0).UTC()
 			hs = &t
 		}
-		stats = append(stats, PeerStat{DeviceAccessID: parts[0], RXTotalBytes: rx, TXTotalBytes: tx, LastHandshakeAt: hs})
+		protocol := "wireguard"
+		if len(parts) > 4 && strings.TrimSpace(parts[4]) != "" {
+			protocol = strings.TrimSpace(parts[4])
+		}
+		stats = append(stats, PeerStat{DeviceAccessID: parts[0], Protocol: protocol, RXTotalBytes: rx, TXTotalBytes: tx, LastHandshakeAt: hs})
 	}
 	return stats, nil
 }
