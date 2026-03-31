@@ -101,6 +101,13 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 	if err := validatePeerRequest(req); err != nil {
 		return OperationResult{}, err
 	}
+	if strings.EqualFold(strings.TrimSpace(req.Protocol), "xray") {
+		r.mu.Lock()
+		r.peersByKey[req.PeerPublicKey] = PeerState{DeviceAccessID: req.DeviceAccessID, Protocol: "xray", PeerPublicKey: req.PeerPublicKey, AssignedIP: req.AssignedIP, Keepalive: req.Keepalive, UpdatedAt: time.Now().UTC()}
+		r.mu.Unlock()
+		r.log("runtime.amnezia_docker.apply_peer.xray.accepted", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID))
+		return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
+	}
 
 	r.mu.Lock()
 	if rec, ok := r.operations[req.OperationID]; ok {
@@ -152,6 +159,12 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 func (r *AmneziaDockerRuntime) RevokePeer(ctx context.Context, req PeerOperationRequest) (OperationResult, error) {
 	if strings.TrimSpace(req.OperationID) == "" || strings.TrimSpace(req.DeviceAccessID) == "" || strings.TrimSpace(req.PeerPublicKey) == "" {
 		return OperationResult{}, errors.New("operation_id, device_access_id and peer_public_key are required")
+	}
+	if strings.EqualFold(strings.TrimSpace(req.Protocol), "xray") {
+		r.mu.Lock()
+		delete(r.peersByKey, req.PeerPublicKey)
+		r.mu.Unlock()
+		return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
 	}
 
 	r.mu.Lock()
@@ -235,7 +248,7 @@ func ParseAWGShowAllDump(out string) ([]PeerStat, error) {
 			t := time.Unix(handshake, 0).UTC()
 			hs = &t
 		}
-		stats = append(stats, PeerStat{PeerPublicKey: parts[0], PresharedKey: parts[1], Endpoint: parts[2], AllowedIP: allowed, LatestHandshakeUnixTime: handshake, RXTotalBytes: rx, TXTotalBytes: tx, LastHandshakeAt: hs})
+		stats = append(stats, PeerStat{Protocol: "wireguard", PeerPublicKey: parts[0], PresharedKey: parts[1], Endpoint: parts[2], AllowedIP: allowed, LatestHandshakeUnixTime: handshake, RXTotalBytes: rx, TXTotalBytes: tx, LastHandshakeAt: hs})
 	}
 	return stats, nil
 }

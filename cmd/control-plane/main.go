@@ -54,6 +54,7 @@ func main() {
 	accessGrantRepo := pgrepo.NewAccessGrantRepository(pg)
 	opRepo := pgrepo.NewNodeOperationRepository(pg)
 	trafficRepo := pgrepo.NewTrafficRepository(pg)
+	financeSvc := &app.FinanceService{PG: pg}
 
 	nodeClientCfg := nodeclient.Config{
 		BaseURL:    cfg.NodeAgentBaseURL,
@@ -89,9 +90,10 @@ func main() {
 				Bot:              &telegram.HTTPBotClient{Token: cfg.TelegramBotToken},
 				States:           telegram.RedisStateStore{Redis: redisClient, TTL: cfg.TelegramStateTTL},
 				RegisterUC:       app.RegisterTelegramUser{Users: userRepo},
-				ActivateInviteUC: app.ActivateInviteCode{Store: pgrepo.NewInviteActivationStore(pg)},
+				ActivateInviteUC: app.ActivateInviteCode{Store: pgrepo.NewInviteActivationStore(pg), Finance: financeSvc},
 				GetGrantUC:       app.GetActiveAccessGrantByUser{AccessGrants: accessGrantRepo},
 				CreateDeviceUC: app.CreateDeviceForUser{
+					Users:         userRepo,
 					Devices:       deviceRepo,
 					Nodes:         nodeRepo,
 					Accesses:      accessRepo,
@@ -138,7 +140,7 @@ func main() {
 					},
 					SensitiveEncryptor: encryptor,
 				},
-				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: auditRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeAppClient}},
+				RevokeAccessUC:  app.RevokeDeviceAccess{Accesses: accessRepo, Devices: deviceRepo, Operations: opRepo, AuditLogs: auditRepo, Tokens: tokenRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeAppClient}},
 				Users:           userRepo,
 				Devices:         deviceRepo,
 				Accesses:        accessRepo,
@@ -190,6 +192,9 @@ func main() {
 		InviteCodes:       inviteRepo,
 		AuditLogs:         auditRepo,
 		TelegramWebhook:   telegramWebhookHandler,
+		AgentHMACSecret:   cfg.AgentHMACSecret,
+		NodeRegisterToken: cfg.NodeRegistrationToken,
+		Finance:           financeSvc,
 	})
 
 	srv := &http.Server{
@@ -222,6 +227,21 @@ func main() {
 		Traffic:       trafficRepo,
 		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
 		PollInterval:  1 * time.Minute,
+	}.Run(workerCtx)
+
+	go app.PeerConsistencyWorker{
+		Logger:        logger,
+		Nodes:         nodeRepo,
+		Accesses:      accessRepo,
+		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
+		PollInterval:  cfg.PeerConsistencyInterval,
+	}.Run(workerCtx)
+
+	go app.DailyChargeWorker{
+		PG:                 pg,
+		RevokeAccess:       app.RevokeDeviceAccess{Accesses: accessRepo, Devices: deviceRepo, Operations: opRepo, AuditLogs: auditRepo, Tokens: tokenRepo, RevokePeerExecutor: &app.ExecuteRevokePeerOperation{Operations: opRepo, Accesses: accessRepo, Nodes: nodeRepo, NodeClient: nodeAppClient}},
+		Interval:           cfg.DailyChargeInterval,
+		DailyChargeKopecks: cfg.DailyChargeKopecks,
 	}.Run(workerCtx)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

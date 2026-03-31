@@ -6,6 +6,10 @@ const (
 	StatusSucceeded = "succeeded"
 	StatusFailed    = "failed"
 	StatusCancelled = "cancelled"
+	StatusPending   = "pending"
+	StatusApplied   = "applied"
+	StatusRetrying  = "retrying"
+	StatusManual    = "manual_intervention_required"
 )
 
 const (

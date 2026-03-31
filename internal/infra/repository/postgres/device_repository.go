@@ -105,6 +105,22 @@ LIMIT 1`
 	return out, nil
 }
 
+func (r *DeviceRepository) GetByID(ctx context.Context, id string) (*device.Device, error) {
+	const query = `
+SELECT id::text, user_id::text, vpn_node_id::text, public_key, COALESCE(name, ''), COALESCE(platform, ''), status, last_seen_at, created_at, updated_at
+FROM devices
+WHERE id = $1`
+
+	out, err := scanDevice(r.q.QueryRow(ctx, query, id))
+	if isNoRows(err) {
+		return nil, device.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *DeviceRepository) Revoke(ctx context.Context, id string) error {
 	const query = `
 UPDATE devices
