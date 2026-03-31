@@ -1,19 +1,19 @@
 # Troubleshooting runbook
 
-## Node is registered but peers are not applied
+## Node health is degraded
 
-1. Check `/nodes/desired-state` response includes expected `protocol` and `peer_public_key`.
-2. Check node-agent logs for `reconcile apply failed`.
-3. Check `node_apply_reports` for failed records.
+1. `docker ps` and confirm `amnezia-awg`, `xray`, `node-agent` are running.
+2. Check node-agent logs for runtime health errors.
+3. Verify docker socket mount and container names from `.env.node.generated`.
 
-## Revoke does not remove peer
+## Xray runtime unavailable
 
-1. Verify revoke payload has non-empty `peer_public_key`.
-2. Verify protocol in payload matches access protocol.
-3. Retry operation and inspect latest `node_apply_reports`.
+1. Validate `XRAY_CONTAINER_NAME` matches compose container name.
+2. Check `deploy/node/xray/config.json` validity.
+3. Restart xray service and verify node-agent heartbeat protocols.
 
-## Runtime drift after restart
+## Unexpected runtime drift
 
-1. Wait one reconcile interval.
-2. Compare DB active accesses vs runtime counters.
-3. If mismatch persists, enable safe reconcile mode and re-run.
+1. Avoid manual runtime edits.
+2. Wait reconcile interval.
+3. Verify `/nodes/desired-state` and `/nodes/apply` reports.

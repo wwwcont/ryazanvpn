@@ -194,12 +194,23 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 
 	reconcile := func() {
 		healthStatus := "active"
+		availableProtocols := make([]string, 0, len(cfg.NodeProtocolsSupported))
 		healthCtx, cancel := context.WithTimeout(ctx, cfg.RuntimeExecTimeout)
 		if err := rt.Health(healthCtx); err != nil {
 			healthStatus = "unhealthy"
+		} else {
+			availableProtocols = append(availableProtocols, "wireguard")
+		}
+		if checkXrayContainer(healthCtx, cfg.DockerBinaryPath, cfg.XrayContainerName) == nil {
+			availableProtocols = append(availableProtocols, "xray")
+		} else if containsProtocol(cfg.NodeProtocolsSupported, "xray") {
+			healthStatus = "unhealthy"
 		}
 		cancel()
-		if err := cp.post(ctx, "/nodes/heartbeat", map[string]any{"node_id": cfg.NodeID, "node_token": cfg.NodeToken, "status": healthStatus, "protocols": cfg.NodeProtocolsSupported}); err != nil {
+		if len(availableProtocols) == 0 {
+			availableProtocols = []string{"wireguard"}
+		}
+		if err := cp.post(ctx, "/nodes/heartbeat", map[string]any{"node_id": cfg.NodeID, "node_token": cfg.NodeToken, "status": healthStatus, "protocols": availableProtocols}); err != nil {
 			logger.Error("node heartbeat failed", slog.Any("error", err))
 		}
 
@@ -223,6 +234,31 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 			reconcile()
 		}
 	}
+}
+
+func checkXrayContainer(ctx context.Context, dockerBin, container string) error {
+	if strings.TrimSpace(container) == "" {
+		return errors.New("xray container is not configured")
+	}
+	bin := strings.TrimSpace(dockerBin)
+	if bin == "" {
+		bin = "docker"
+	}
+	cmd := exec.CommandContext(ctx, bin, "inspect", "--type", "container", container)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("xray inspect failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func containsProtocol(items []string, target string) bool {
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
 }
 
 func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRuntime, desired []struct {

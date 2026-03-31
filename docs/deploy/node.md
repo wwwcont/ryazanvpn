@@ -3,6 +3,10 @@
 ## Stack mode
 
 Use `docker-compose.node.yml` on each VPN node host.
+Node stack includes:
+- `node-agent`
+- `amnezia-awg`
+- `xray`
 
 ## Quick start
 
@@ -25,3 +29,5 @@ Node-agent startup flow:
 4. reconcile runtime and `POST /nodes/apply`
 
 This enables automatic node attachment after startup.
+
+Do not configure peers manually from desktop Amnezia apps on server hosts.
