@@ -3,15 +3,14 @@ package nodeclient
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/wwwcont/ryazanvpn/internal/agent/auth"
 )
 
 type OperationRequest struct {
@@ -72,14 +71,13 @@ func (c *Client) RevokePeer(ctx context.Context, req OperationRequest) error {
 
 func (c *Client) GetTrafficCounters(ctx context.Context) ([]TrafficCounter, error) {
 	ts := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	body := []byte("{}")
-	sig := c.sign(ts, body)
+	sig := c.sign(ts, nil)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/agent/v1/traffic/counters", nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	httpReq.Header.Set("X-Agent-Timestamp", ts)
-	httpReq.Header.Set("X-Agent-Signature", sig)
+	httpReq.Header.Set(auth.HeaderTimestamp, ts)
+	httpReq.Header.Set(auth.HeaderSignature, sig)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -128,8 +126,8 @@ func (c *Client) do(ctx context.Context, method, path string, payload OperationR
 			return fmt.Errorf("build request: %w", err)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("X-Agent-Timestamp", ts)
-		httpReq.Header.Set("X-Agent-Signature", sig)
+		httpReq.Header.Set(auth.HeaderTimestamp, ts)
+		httpReq.Header.Set(auth.HeaderSignature, sig)
 
 		resp, err := c.httpClient.Do(httpReq)
 		if err != nil {
@@ -154,9 +152,5 @@ func (c *Client) do(ctx context.Context, method, path string, payload OperationR
 }
 
 func (c *Client) sign(ts string, body []byte) string {
-	mac := hmac.New(sha256.New, c.secret)
-	_, _ = mac.Write([]byte(ts))
-	_, _ = mac.Write([]byte("."))
-	_, _ = mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
+	return auth.Sign(c.secret, ts, body)
 }

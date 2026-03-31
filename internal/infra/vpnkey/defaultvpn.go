@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
@@ -38,13 +39,13 @@ type defaultVPNContainer struct {
 }
 
 type defaultVPNAWG struct {
-	Jc              int    `json:"Jc"`
-	Jmin            int    `json:"Jmin"`
-	Jmax            int    `json:"Jmax"`
-	S1              int    `json:"S1"`
-	S2              int    `json:"S2"`
-	S3              int    `json:"S3"`
-	S4              int    `json:"S4"`
+	Jc              string `json:"Jc"`
+	Jmin            string `json:"Jmin"`
+	Jmax            string `json:"Jmax"`
+	S1              string `json:"S1"`
+	S2              string `json:"S2"`
+	S3              string `json:"S3"`
+	S4              string `json:"S4"`
 	H1              string `json:"H1"`
 	H2              string `json:"H2"`
 	H3              string `json:"H3"`
@@ -54,7 +55,7 @@ type defaultVPNAWG struct {
 	I3              string `json:"I3"`
 	I4              string `json:"I4"`
 	I5              string `json:"I5"`
-	Port            int    `json:"port"`
+	Port            string `json:"port"`
 	ProtocolVersion string `json:"protocol_version"`
 	SubnetAddress   string `json:"subnet_address"`
 	TransportProto  string `json:"transport_proto"`
@@ -63,14 +64,14 @@ type defaultVPNAWG struct {
 
 type defaultVPNLastConfig struct {
 	ClientID            string   `json:"clientId"`
-	MTU                 int      `json:"mtu"`
-	Jc                  int      `json:"Jc"`
-	Jmin                int      `json:"Jmin"`
-	Jmax                int      `json:"Jmax"`
-	S1                  int      `json:"S1"`
-	S2                  int      `json:"S2"`
-	S3                  int      `json:"S3"`
-	S4                  int      `json:"S4"`
+	MTU                 string   `json:"mtu"`
+	Jc                  string   `json:"Jc"`
+	Jmin                string   `json:"Jmin"`
+	Jmax                string   `json:"Jmax"`
+	S1                  string   `json:"S1"`
+	S2                  string   `json:"S2"`
+	S3                  string   `json:"S3"`
+	S4                  string   `json:"S4"`
 	H1                  string   `json:"H1"`
 	H2                  string   `json:"H2"`
 	H3                  string   `json:"H3"`
@@ -87,7 +88,7 @@ type defaultVPNLastConfig struct {
 	ServerPublicKey     string   `json:"server_pub_key"`
 	HostName            string   `json:"hostName"`
 	Port                int      `json:"port"`
-	PersistentKeepAlive int      `json:"persistent_keep_alive"`
+	PersistentKeepAlive string   `json:"persistent_keep_alive"`
 	AllowedIPs          []string `json:"allowed_ips"`
 	Config              string   `json:"config"`
 }
@@ -135,14 +136,14 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 
 	lastCfg := defaultVPNLastConfig{
 		ClientID:            clientPublicKey,
-		MTU:                 mtu,
-		Jc:                  in.AWG.Jc,
-		Jmin:                in.AWG.Jmin,
-		Jmax:                in.AWG.Jmax,
-		S1:                  in.AWG.S1,
-		S2:                  in.AWG.S2,
-		S3:                  in.AWG.S3,
-		S4:                  in.AWG.S4,
+		MTU:                 strconv.Itoa(mtu),
+		Jc:                  strconv.Itoa(in.AWG.Jc),
+		Jmin:                strconv.Itoa(in.AWG.Jmin),
+		Jmax:                strconv.Itoa(in.AWG.Jmax),
+		S1:                  strconv.Itoa(in.AWG.S1),
+		S2:                  strconv.Itoa(in.AWG.S2),
+		S3:                  strconv.Itoa(in.AWG.S3),
+		S4:                  strconv.Itoa(in.AWG.S4),
 		H1:                  strings.TrimSpace(in.AWG.H1),
 		H2:                  strings.TrimSpace(in.AWG.H2),
 		H3:                  strings.TrimSpace(in.AWG.H3),
@@ -159,7 +160,7 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 		ServerPublicKey:     parsed.ServerPublicKey,
 		HostName:            host,
 		Port:                port,
-		PersistentKeepAlive: parsed.PersistentKeepalive,
+		PersistentKeepAlive: strconv.Itoa(parsed.PersistentKeepalive),
 		AllowedIPs:          parsed.AllowedIPs,
 		Config:              cfgText,
 	}
@@ -177,13 +178,13 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 		Containers: []defaultVPNContainer{{
 			Container: containerID,
 			AWG: defaultVPNAWG{
-				Jc:              in.AWG.Jc,
-				Jmin:            in.AWG.Jmin,
-				Jmax:            in.AWG.Jmax,
-				S1:              in.AWG.S1,
-				S2:              in.AWG.S2,
-				S3:              in.AWG.S3,
-				S4:              in.AWG.S4,
+				Jc:              strconv.Itoa(in.AWG.Jc),
+				Jmin:            strconv.Itoa(in.AWG.Jmin),
+				Jmax:            strconv.Itoa(in.AWG.Jmax),
+				S1:              strconv.Itoa(in.AWG.S1),
+				S2:              strconv.Itoa(in.AWG.S2),
+				S3:              strconv.Itoa(in.AWG.S3),
+				S4:              strconv.Itoa(in.AWG.S4),
 				H1:              strings.TrimSpace(in.AWG.H1),
 				H2:              strings.TrimSpace(in.AWG.H2),
 				H3:              strings.TrimSpace(in.AWG.H3),
@@ -193,7 +194,7 @@ func (e *DefaultVPNExporter) ExportDefaultVPN(_ context.Context, in app.ExportVP
 				I3:              strings.TrimSpace(in.AWG.I3),
 				I4:              strings.TrimSpace(in.AWG.I4),
 				I5:              strings.TrimSpace(in.AWG.I5),
-				Port:            port,
+				Port:            strconv.Itoa(port),
 				ProtocolVersion: firstNonEmpty(strings.TrimSpace(fmt.Sprintf("%d", defaultInt(in.ProtocolVersion, 2))), "2"),
 				SubnetAddress:   subnetAddress,
 				TransportProto:  firstNonEmpty(strings.TrimSpace(in.TransportProto), "udp"),

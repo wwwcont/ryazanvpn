@@ -1,15 +1,14 @@
 package httpnode
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wwwcont/ryazanvpn/internal/agent/auth"
 )
 
 func TestHMACAuthMiddleware_ValidSignature(t *testing.T) {
@@ -23,8 +22,8 @@ func TestHMACAuthMiddleware_ValidSignature(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/agent/v1/operations/apply-peer", strings.NewReader(body))
-	req.Header.Set(headerTimestamp, strconv.FormatInt(ts, 10))
-	req.Header.Set(headerSignature, sig)
+	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(auth.HeaderSignature, sig)
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -44,8 +43,8 @@ func TestHMACAuthMiddleware_InvalidSignature(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/agent/v1/operations/apply-peer", strings.NewReader(body))
-	req.Header.Set(headerTimestamp, strconv.FormatInt(ts, 10))
-	req.Header.Set(headerSignature, "deadbeef")
+	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(auth.HeaderSignature, "deadbeef")
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -66,8 +65,8 @@ func TestHMACAuthMiddleware_ExpiredTimestamp(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/agent/v1/operations/apply-peer", strings.NewReader(body))
-	req.Header.Set(headerTimestamp, strconv.FormatInt(ts, 10))
-	req.Header.Set(headerSignature, sig)
+	req.Header.Set(auth.HeaderTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(auth.HeaderSignature, sig)
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -78,9 +77,5 @@ func TestHMACAuthMiddleware_ExpiredTimestamp(t *testing.T) {
 }
 
 func sign(secret string, ts int64, body string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(strconv.FormatInt(ts, 10)))
-	_, _ = mac.Write([]byte("."))
-	_, _ = mac.Write([]byte(body))
-	return hex.EncodeToString(mac.Sum(nil))
+	return auth.Sign([]byte(secret), strconv.FormatInt(ts, 10), []byte(body))
 }
