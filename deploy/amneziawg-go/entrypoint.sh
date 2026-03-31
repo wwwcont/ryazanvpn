@@ -4,6 +4,7 @@ set -eu
 IFACE="${AMNEZIA_INTERFACE_NAME:-awg0}"
 CONF_DIR="${AMNEZIA_CONFIG_DIR:-/etc/amnezia}"
 CONFIG_PATH="${AMNEZIA_CONFIG_PATH:-}"
+KEEP_UP="${AMNEZIA_KEEP_INTERFACE_UP:-1}"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -48,17 +49,23 @@ extract_addresses() {
   ' "$conf"
 }
 
-ensure_tun() {
-  if [ ! -c /dev/net/tun ]; then
-    mkdir -p /dev/net
-    mknod /dev/net/tun c 10 200 || true
-    chmod 600 /dev/net/tun || true
+create_interface() {
+  if ip link show "$IFACE" >/dev/null 2>&1; then
+    return
+  fi
+
+  ip link add "$IFACE" type amneziawg 2>/dev/null \
+    || ip link add "$IFACE" type wireguard 2>/dev/null \
+    || true
+
+  if ! ip link show "$IFACE" >/dev/null 2>&1; then
+    echo "failed to create interface $IFACE (neither amneziawg nor wireguard type available)" >&2
+    exit 1
   fi
 }
 
 apply_config() {
   conf="$1"
-
   /usr/local/bin/awg setconf "$IFACE" "$conf"
 
   extract_addresses "$conf" | while IFS= read -r addr; do
@@ -70,26 +77,24 @@ apply_config() {
 }
 
 shutdown() {
+  if [ "$KEEP_UP" = "1" ]; then
+    return
+  fi
   ip link del "$IFACE" 2>/dev/null || true
 }
 
 main() {
-  ensure_tun
-
-  /usr/local/bin/amneziawg-go "$IFACE" &
-  WG_PID="$!"
-
-  trap 'shutdown; kill "$WG_PID" 2>/dev/null || true; wait "$WG_PID" 2>/dev/null || true' INT TERM
+  create_interface
 
   conf="$(find_config || true)"
   if [ -n "$conf" ]; then
-    sleep "${AMNEZIA_STARTUP_DELAY_SEC:-1}"
     apply_config "$conf"
   else
-    echo "amneziawg-go: config not found in $CONF_DIR, starting interface without setconf" >&2
+    echo "kernel-backed awg runtime: config not found in $CONF_DIR" >&2
   fi
 
-  wait "$WG_PID"
+  trap 'shutdown; exit 0' INT TERM
+  while :; do sleep 3600; done
 }
 
 main "$@"

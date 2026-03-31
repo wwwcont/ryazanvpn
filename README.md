@@ -60,7 +60,7 @@ make down-single
 Для `RUNTIME_ADAPTER=amnezia_docker`:
 - `node-agent` использует Docker socket хоста: `/var/run/docker.sock:/var/run/docker.sock`
 - внутри image `node-agent` должен быть Docker CLI (`docker-cli`)
-- путь задаётся через `DOCKER_BINARY_PATH` (рекомендуется `/usr/bin/docker`)
+- путь задаётся через `DOCKER_BINARY_PATH` (рекомендуется `docker`, резолвится в PATH внутри container image)
 
 Если runtime недоступен при старте, `node-agent` больше не падает в crash loop:
 - HTTP сервер продолжает работать
@@ -77,7 +77,7 @@ make down-single
 - `RUNTIME_ADAPTER=amnezia_docker`
 - `AMNEZIA_CONTAINER_NAME=amnezia-awg2`
 - `AMNEZIA_INTERFACE_NAME=awg0`
-- `DOCKER_BINARY_PATH=/usr/bin/docker`
+- `DOCKER_BINARY_PATH=docker`
 - `VPN_SERVER_PUBLIC_ENDPOINT=193.29.224.182:41475`
 - `VPN_SERVER_PUBLIC_KEY=iyuNicNyxL3EWzP3JgRJdKozE8TXOArEU6TGcMoK5CU=`
 - `VPN_SUBNET_CIDR=10.8.1.0/24`
@@ -176,3 +176,22 @@ docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d -
 ```
 
 Подробно: `docs/runbooks/add-node.md`.
+
+## Startup validation checklist
+
+После `docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build` проверьте:
+
+```bash
+docker compose --env-file .env.single.generated -f docker-compose.single.yml ps
+curl -fsS http://localhost:8080/health
+curl -fsS http://localhost:8081/health
+docker logs ryazanvpn-xray --tail 50
+docker exec amnezia-awg2 awg show awg0
+docker exec $(docker compose --env-file .env.single.generated -f docker-compose.single.yml ps -q node-agent) docker version
+```
+
+Ожидания:
+- `control-plane` в статусе `Up` и health endpoint отвечает `200`;
+- `xray` в статусе `Up`, без ошибки `xray xray: unknown command`;
+- `amnezia-awg` отдаёт `awg show` и интерфейс поднят kernel-backed runtime;
+- `node-agent` видит Docker API через `/var/run/docker.sock` и проходит runtime health.
