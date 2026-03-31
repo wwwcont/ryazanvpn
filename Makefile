@@ -7,9 +7,12 @@ SINGLE_ENV ?= .env.single.generated
 SINGLE_COMPOSE = docker compose --env-file $(SINGLE_ENV) -f docker-compose.single.yml
 
 .PHONY: \
-	run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
+	single run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
 	run-backend run-node \
 	test lint migrate-up migrate-down
+
+single:
+	$(SINGLE_COMPOSE) up -d --build
 
 run-single:
 	$(SINGLE_COMPOSE) up -d --build
