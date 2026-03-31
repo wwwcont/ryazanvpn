@@ -1,6 +1,8 @@
 services:
   amnezia-awg:
-    image: ghcr.io/amnezia-vpn/amneziawg:latest
+    build:
+      context: .
+      dockerfile: deploy/amneziawg-go/Dockerfile
     container_name: ${AMNEZIA_CONTAINER_NAME:-amnezia-awg2}
     restart: unless-stopped
     cap_add:
@@ -11,6 +13,7 @@ services:
       - net.ipv6.conf.all.forwarding=1
     environment:
       - TZ=${TZ:-UTC}
+      - AMNEZIA_INTERFACE_NAME=${AMNEZIA_INTERFACE_NAME:-awg0}
     volumes:
       - node_amnezia_data:/var/lib/amnezia
       - ./deploy/node/amnezia:/etc/amnezia:rw
@@ -21,7 +24,7 @@ services:
       retries: 5
 
   xray:
-    image: teddysun/xray:latest
+    image: ghcr.io/xtls/xray-core:latest
     container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
