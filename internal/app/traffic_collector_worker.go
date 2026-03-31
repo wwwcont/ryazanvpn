@@ -70,7 +70,16 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 				w.logErr("get previous snapshot", err)
 				continue
 			}
-			if _, err := w.Traffic.CreateSnapshot(ctx, traffic.CreateSnapshotParams{DeviceID: acc.DeviceID, CapturedAt: now, RXTotalBytes: c.RXTotalBytes, TXTotalBytes: c.TXTotalBytes}); err != nil {
+			if _, err := w.Traffic.CreateSnapshot(ctx, traffic.CreateSnapshotParams{
+				DeviceID:        acc.DeviceID,
+				DeviceAccessID:  &acc.AccessID,
+				VPNNodeID:       &n.ID,
+				Protocol:        valueOrDefault(c.Protocol, "wireguard"),
+				CapturedAt:      now,
+				RXTotalBytes:    c.RXTotalBytes,
+				TXTotalBytes:    c.TXTotalBytes,
+				LastHandshakeAt: c.LastHandshakeAt,
+			}); err != nil {
 				w.logErr("create snapshot", err)
 				continue
 			}
@@ -87,7 +96,15 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 					txDelta = c.TXTotalBytes
 				}
 			}
-			if err := w.Traffic.AddDailyUsageDelta(ctx, traffic.AddDailyUsageDeltaParams{DeviceID: acc.DeviceID, UsageDate: now, RXDelta: rxDelta, TXDelta: txDelta}); err != nil {
+			if err := w.Traffic.AddDailyUsageDelta(ctx, traffic.AddDailyUsageDeltaParams{
+				DeviceID:  acc.DeviceID,
+				VPNNodeID: &n.ID,
+				Protocol:  valueOrDefault(c.Protocol, "wireguard"),
+				UsageDate: now,
+				MonthDate: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
+				RXDelta:   rxDelta,
+				TXDelta:   txDelta,
+			}); err != nil {
 				w.logErr("add daily usage delta", err)
 			}
 		}
@@ -97,12 +114,12 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string, c NodeTrafficCounter) (*trafficAccess, error) {
 	acc, err := w.Accesses.GetByID(ctx, c.DeviceAccessID)
 	if err == nil && acc != nil {
-		return &trafficAccess{DeviceID: acc.DeviceID}, nil
+		return &trafficAccess{DeviceID: acc.DeviceID, AccessID: acc.ID}, nil
 	}
 	if c.AllowedIP != "" {
 		accByIP, ipErr := w.Accesses.GetActiveByNodeAndAssignedIP(ctx, nodeID, c.AllowedIP)
 		if ipErr == nil && accByIP != nil {
-			return &trafficAccess{DeviceID: accByIP.DeviceID}, nil
+			return &trafficAccess{DeviceID: accByIP.DeviceID, AccessID: accByIP.ID}, nil
 		}
 	}
 	return nil, err
@@ -110,6 +127,7 @@ func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string
 
 type trafficAccess struct {
 	DeviceID string
+	AccessID string
 }
 
 func (w TrafficCollectorWorker) logErr(msg string, err error) {

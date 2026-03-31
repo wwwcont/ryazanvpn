@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -22,8 +23,11 @@ type createPeerPayload struct {
 }
 
 type revokePeerPayload struct {
-	AccessID string `json:"access_id"`
-	DeviceID string `json:"device_id"`
+	AccessID       string `json:"access_id"`
+	DeviceID       string `json:"device_id"`
+	DeviceAccessID string `json:"device_access_id"`
+	Protocol       string `json:"protocol"`
+	PeerPublicKey  string `json:"peer_public_key"`
 }
 
 type ExecuteCreatePeerOperation struct {
@@ -55,6 +59,11 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 		_ = uc.Operations.MarkFailed(ctx, op.ID, now, "invalid payload")
 		return err
 	}
+	protocol := strings.TrimSpace(payload.Protocol)
+	if protocol == "" {
+		_ = uc.Operations.MarkFailed(ctx, op.ID, now, "protocol is required")
+		return errors.New("protocol is required")
+	}
 
 	accessEntry, err := uc.Accesses.GetByID(ctx, payload.AccessID)
 	if err != nil {
@@ -72,7 +81,7 @@ func (uc ExecuteCreatePeerOperation) Execute(ctx context.Context, operationID st
 		AgentBaseURL:   nodeInfo.AgentBaseURL,
 		OperationID:    op.ID,
 		DeviceAccessID: accessEntry.ID,
-		Protocol:       valueOrDefault(payload.Protocol, "wireguard"),
+		Protocol:       protocol,
 		PeerPublicKey:  payload.PublicKey,
 		AssignedIP:     payload.AssignedIP,
 		Keepalive:      valueOrDefaultInt(payload.Keepalive, 25),
@@ -167,6 +176,21 @@ func (uc ExecuteRevokePeerOperation) Execute(ctx context.Context, operationID st
 		return err
 	}
 
+	var payload revokePeerPayload
+	if err := json.Unmarshal([]byte(op.PayloadJSON), &payload); err != nil {
+		_ = uc.Operations.MarkFailed(ctx, op.ID, now, "invalid payload")
+		return err
+	}
+	protocol := strings.TrimSpace(payload.Protocol)
+	if protocol == "" {
+		protocol = strings.TrimSpace(accessEntry.Protocol)
+	}
+	peerPublicKey := strings.TrimSpace(payload.PeerPublicKey)
+	if peerPublicKey == "" {
+		_ = uc.Operations.MarkFailed(ctx, op.ID, now, "peer_public_key is required for revoke")
+		return errors.New("peer_public_key is required for revoke")
+	}
+
 	nodeInfo, err := uc.Nodes.GetByID(ctx, op.VPNNodeID)
 	if err != nil {
 		_ = uc.Operations.MarkFailed(ctx, op.ID, now, err.Error())
@@ -177,8 +201,8 @@ func (uc ExecuteRevokePeerOperation) Execute(ctx context.Context, operationID st
 		AgentBaseURL:   nodeInfo.AgentBaseURL,
 		OperationID:    op.ID,
 		DeviceAccessID: accessEntry.ID,
-		Protocol:       "wireguard",
-		PeerPublicKey:  "n/a",
+		Protocol:       protocol,
+		PeerPublicKey:  peerPublicKey,
 		AssignedIP:     valuePtrOrDefault(accessEntry.AssignedIP, "0.0.0.0/32"),
 		Keepalive:      0,
 	}

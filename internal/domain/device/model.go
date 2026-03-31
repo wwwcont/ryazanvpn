@@ -24,6 +24,7 @@ type Device struct {
 type Repository interface {
 	Create(ctx context.Context, in CreateParams) (*Device, error)
 	ListByUserID(ctx context.Context, userID string) ([]*Device, error)
+	GetByID(ctx context.Context, id string) (*Device, error)
 	GetActiveByUserID(ctx context.Context, userID string) (*Device, error)
 	Revoke(ctx context.Context, id string) error
 	AssignNode(ctx context.Context, id string, vpnNodeID string) error

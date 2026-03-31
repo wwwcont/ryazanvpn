@@ -30,7 +30,7 @@ func TestExecuteCreatePeerOperation_Success(t *testing.T) {
 }
 
 func TestExecuteCreatePeerOperation_FailureMarksError(t *testing.T) {
-	ops := &execFakeOps{op: &operation.NodeOperation{ID: "op1", VPNNodeID: "n1", PayloadJSON: `{"access_id":"a1","public_key":"pk","assigned_ip":"10.0.0.2/32"}`}}
+	ops := &execFakeOps{op: &operation.NodeOperation{ID: "op1", VPNNodeID: "n1", PayloadJSON: `{"access_id":"a1","public_key":"pk","assigned_ip":"10.0.0.2/32","protocol":"wireguard"}`}}
 	acc := &execFakeAccess{entry: &access.DeviceAccess{ID: "a1", DeviceID: "d1", VPNNodeID: "n1", AssignedIP: strPtr("10.0.0.2/32")}}
 	nodes := &execFakeNodes{node: &node.Node{ID: "n1", CurrentLoad: 5}}
 	client := &execFakeNodeClient{applyErr: errors.New("timeout")}
@@ -45,7 +45,7 @@ func TestExecuteCreatePeerOperation_FailureMarksError(t *testing.T) {
 }
 
 func TestExecuteRevokePeerOperation_Success(t *testing.T) {
-	ops := &execFakeOps{op: &operation.NodeOperation{ID: "op2", VPNNodeID: "n1"}}
+	ops := &execFakeOps{op: &operation.NodeOperation{ID: "op2", VPNNodeID: "n1", PayloadJSON: `{"access_id":"a1","device_access_id":"a1","protocol":"wireguard","peer_public_key":"pk1"}`}}
 	acc := &execFakeAccess{entry: &access.DeviceAccess{ID: "a1", DeviceID: "d1", VPNNodeID: "n1", AssignedIP: strPtr("10.0.0.2/32")}}
 	nodes := &execFakeNodes{node: &node.Node{ID: "n1", CurrentLoad: 3}}
 	client := &execFakeNodeClient{}
@@ -108,11 +108,15 @@ func (f *execFakeAccess) MarkError(ctx context.Context, id string, failedAt time
 func (f *execFakeAccess) SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error {
 	return nil
 }
+func (f *execFakeAccess) ClearConfigBlobEncrypted(ctx context.Context, id string) error { return nil }
 func (f *execFakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{f.entry}, nil
 }
 func (f *execFakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return f.entry, nil
+}
+func (f *execFakeAccess) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
+	return []*access.DeviceAccess{f.entry}, nil
 }
 
 type execFakeNodes struct {

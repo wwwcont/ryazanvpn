@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 
 type IssueDeviceConfigInput struct {
 	DeviceAccessID   string
+	Protocol         string
 	DevicePrivateKey string
 	DevicePublicKey  string
 	ServerPublicKey  string
@@ -35,6 +37,7 @@ type IssueDeviceConfigInput struct {
 type IssueDeviceConfigOutput struct {
 	Token     string
 	ExpiresAt time.Time
+	QRPayload string
 }
 
 type IssueDeviceConfig struct {
@@ -70,19 +73,35 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		}
 	}
 
-	cfg, err := uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{
-		DevicePrivateKey: in.DevicePrivateKey,
-		ServerPublicKey:  in.ServerPublicKey,
-		PresharedKey:     in.PresharedKey,
-		AssignedIP:       in.AssignedIP,
-		MTU:              in.MTU,
-		DNS:              in.DNS,
-		EndpointHost:     in.EndpointHost,
-		EndpointPort:     in.EndpointPort,
-		Keepalive:        in.Keepalive,
-		AllowedIPs:       in.AllowedIPs,
-		AWG:              in.AWG,
-	})
+	protocol := strings.TrimSpace(in.Protocol)
+	if protocol == "" {
+		protocol = "wireguard"
+	}
+	var cfg string
+	if protocol == "xray" {
+		cfg, err = uc.Renderer.RenderXrayReality(RenderXrayRealityInput{
+			DeviceID:     in.DeviceAccessID,
+			DevicePublic: derivedPublicKey,
+			ServerName:   "www.cloudflare.com",
+			ServerHost:   in.EndpointHost,
+			ServerPort:   in.EndpointPort,
+			UserUUID:     hashToken(in.DeviceAccessID)[:32],
+		})
+	} else {
+		cfg, err = uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{
+			DevicePrivateKey: in.DevicePrivateKey,
+			ServerPublicKey:  in.ServerPublicKey,
+			PresharedKey:     in.PresharedKey,
+			AssignedIP:       in.AssignedIP,
+			MTU:              in.MTU,
+			DNS:              in.DNS,
+			EndpointHost:     in.EndpointHost,
+			EndpointPort:     in.EndpointPort,
+			Keepalive:        in.Keepalive,
+			AllowedIPs:       in.AllowedIPs,
+			AWG:              in.AWG,
+		})
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "missing required fields") {
 			slog.Error("config render input incomplete", "device_access_id", in.DeviceAccessID, "error", err)
@@ -117,7 +136,7 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	}
 	slog.Info("config download token created", "device_access_id", in.DeviceAccessID, "expires_at", expiresAt)
 
-	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt}, nil
+	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt, QRPayload: base64.StdEncoding.EncodeToString([]byte(cfg))}, nil
 }
 
 type DownloadDeviceConfigByToken struct {
@@ -125,6 +144,50 @@ type DownloadDeviceConfigByToken struct {
 	Accesses  DeviceAccessRepository
 	Encryptor EncryptionService
 	Now       func() time.Time
+}
+
+type ReissueDeviceConfigByProtocolInput struct {
+	DeviceID         string
+	Protocol         string
+	DevicePrivateKey string
+	DevicePublicKey  string
+	ServerPublicKey  string
+	PresharedKey     string
+	AssignedIP       string
+	EndpointHost     string
+	EndpointPort     int
+	AllowedIPs       []string
+	AWG              DefaultVPNAWGFields
+}
+
+type ReissueDeviceConfigByProtocol struct {
+	Accesses DeviceAccessRepository
+	Issuer   IssueDeviceConfig
+}
+
+func (uc ReissueDeviceConfigByProtocol) Execute(ctx context.Context, in ReissueDeviceConfigByProtocolInput) (*IssueDeviceConfigOutput, error) {
+	items, err := uc.Accesses.GetActiveByDeviceID(ctx, in.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	for _, acc := range items {
+		if strings.EqualFold(strings.TrimSpace(acc.Protocol), strings.TrimSpace(in.Protocol)) {
+			return uc.Issuer.Execute(ctx, IssueDeviceConfigInput{
+				DeviceAccessID:   acc.ID,
+				Protocol:         in.Protocol,
+				DevicePrivateKey: in.DevicePrivateKey,
+				DevicePublicKey:  in.DevicePublicKey,
+				ServerPublicKey:  in.ServerPublicKey,
+				PresharedKey:     in.PresharedKey,
+				AssignedIP:       in.AssignedIP,
+				EndpointHost:     in.EndpointHost,
+				EndpointPort:     in.EndpointPort,
+				AllowedIPs:       in.AllowedIPs,
+				AWG:              in.AWG,
+			})
+		}
+	}
+	return nil, access.ErrNotFound
 }
 
 func (uc DownloadDeviceConfigByToken) Execute(ctx context.Context, rawToken string) (string, error) {

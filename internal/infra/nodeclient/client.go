@@ -32,6 +32,7 @@ type Config struct {
 
 type TrafficCounter struct {
 	DeviceAccessID  string     `json:"device_access_id"`
+	Protocol        string     `json:"protocol,omitempty"`
 	PeerPublicKey   string     `json:"peer_public_key,omitempty"`
 	AllowedIP       string     `json:"allowed_ip,omitempty"`
 	Endpoint        string     `json:"endpoint,omitempty"`

@@ -40,8 +40,9 @@ type ActivateInviteCodeStore interface {
 }
 
 type ActivateInviteCode struct {
-	Store ActivateInviteCodeStore
-	Now   func() time.Time
+	Store   ActivateInviteCodeStore
+	Now     func() time.Time
+	Finance *FinanceService
 }
 
 func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeInput) error {
@@ -106,6 +107,11 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		})
 		if err != nil {
 			return err
+		}
+		if uc.Finance != nil {
+			if err := uc.Finance.ApplyInviteBonus(ctx, u.ID, ic.ID, 20_000); err != nil {
+				return err
+			}
 		}
 
 		updated, err := repos.InviteCodes().IncrementUsageAndMaybeExhaust(ctx, ic.ID)

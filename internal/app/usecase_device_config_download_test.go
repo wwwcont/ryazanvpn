@@ -77,11 +77,18 @@ func (r *cfgAccessRepo) SetConfigBlobEncrypted(_ context.Context, _ string, blob
 	r.entry.ConfigBlobEncrypted = blob
 	return nil
 }
+func (r *cfgAccessRepo) ClearConfigBlobEncrypted(_ context.Context, _ string) error {
+	r.entry.ConfigBlobEncrypted = nil
+	return nil
+}
 func (r *cfgAccessRepo) GetActiveByDeviceID(context.Context, string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{r.entry}, nil
 }
 func (r *cfgAccessRepo) GetActiveByNodeAndAssignedIP(context.Context, string, string) (*access.DeviceAccess, error) {
 	return r.entry, nil
+}
+func (r *cfgAccessRepo) ListActiveByNodeID(context.Context, string) ([]*access.DeviceAccess, error) {
+	return []*access.DeviceAccess{r.entry}, nil
 }
 
 type cfgTokenRepo struct {
@@ -104,11 +111,17 @@ func (r *cfgTokenRepo) MarkUsed(ctx context.Context, id string, usedAt time.Time
 	r.entry.UsedAt = &usedAt
 	return nil
 }
+func (r *cfgTokenRepo) RevokeIssuedByAccessID(ctx context.Context, deviceAccessID string, revokedAt time.Time) error {
+	return nil
+}
 
 type fakeRenderer struct{}
 
 func (fakeRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
 	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey, nil
+}
+func (fakeRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	return "{\"protocol\":\"xray\"}", nil
 }
 
 type fakeEncryptor struct{}

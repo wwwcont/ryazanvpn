@@ -32,6 +32,7 @@ type Config struct {
 	AdminSecretHeader       string
 	NodeHealthPollInterval  time.Duration
 	NodeHealthCheckTimeout  time.Duration
+	PeerConsistencyInterval time.Duration
 	RuntimeAdapter          string
 	RuntimeWorkDir          string
 	AWGBinaryPath           string
@@ -69,6 +70,18 @@ type Config struct {
 	PublicBaseURL           string
 	TelegramStateTTL        time.Duration
 	TelegramAdminIDs        []int64
+	NodeName                string
+	ControlPlaneBaseURL     string
+	NodeHeartbeatInterval   time.Duration
+	NodeProtocolsSupported  []string
+	NodeRegistrationToken   string
+	NodeID                  string
+	NodeToken               string
+	NodeRegion              string
+	NodePublicIP            string
+	NodeCapacity            int
+	DailyChargeInterval     time.Duration
+	DailyChargeKopecks      int64
 }
 
 // LoadConfig reads and validates service configuration from env.
@@ -84,10 +97,10 @@ func LoadConfig(serviceName string) (Config, error) {
 		RedisDB:                 intFromEnv("REDIS_DB", 0),
 		ReadinessTimeout:        durationFromEnv("READINESS_TIMEOUT", 2*time.Second),
 		LivenessTimeout:         durationFromEnv("LIVENESS_TIMEOUT", 2*time.Second),
-		AgentHMACSecret:         os.Getenv("AGENT_HMAC_SECRET"),
+		AgentHMACSecret:         firstNonEmpty(os.Getenv("AGENT_HMAC_SECRET"), os.Getenv("NODE_AGENT_HMAC_SECRET")),
 		AgentHMACMaxSkew:        durationFromEnv("AGENT_HMAC_MAX_SKEW", 5*time.Minute),
 		NodeAgentBaseURL:        envOrDefault("NODE_AGENT_BASE_URL", "http://node-agent:8081"),
-		NodeAgentSecret:         os.Getenv("NODE_AGENT_HMAC_SECRET"),
+		NodeAgentSecret:         firstNonEmpty(os.Getenv("NODE_AGENT_HMAC_SECRET"), os.Getenv("AGENT_HMAC_SECRET")),
 		NodeAgentTimeout:        durationFromEnv("NODE_AGENT_TIMEOUT", 5*time.Second),
 		NodeAgentRetries:        intFromEnv("NODE_AGENT_RETRIES", 2),
 		ConfigMasterKey:         os.Getenv("CONFIG_MASTER_KEY"),
@@ -95,6 +108,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		AdminSecretHeader:       envOrDefault("ADMIN_API_SECRET_HEADER", "X-Admin-Secret"),
 		NodeHealthPollInterval:  durationFromEnv("NODE_HEALTH_POLL_INTERVAL", 15*time.Second),
 		NodeHealthCheckTimeout:  durationFromEnv("NODE_HEALTH_CHECK_TIMEOUT", 3*time.Second),
+		PeerConsistencyInterval: durationFromEnv("PEER_CONSISTENCY_INTERVAL", 2*time.Minute),
 		RuntimeAdapter:          envOrDefault("RUNTIME_ADAPTER", "mock"),
 		RuntimeWorkDir:          envOrDefault("RUNTIME_WORK_DIR", "/var/lib/ryazanvpn/node-agent"),
 		AWGBinaryPath:           envOrDefault("AWG_BINARY_PATH", "/usr/bin/awg"),
@@ -132,6 +146,18 @@ func LoadConfig(serviceName string) (Config, error) {
 		PublicBaseURL:           envOrDefault("PUBLIC_BASE_URL", "http://localhost:8080"),
 		TelegramStateTTL:        durationFromEnv("TELEGRAM_STATE_TTL", 24*time.Hour),
 		TelegramAdminIDs:        int64ListFromEnv("TELEGRAM_ADMIN_IDS"),
+		NodeName:                envOrDefault("NODE_NAME", ""),
+		ControlPlaneBaseURL:     envOrDefault("CONTROL_PLANE_BASE_URL", "http://control-plane:8080"),
+		NodeHeartbeatInterval:   durationFromEnv("NODE_HEARTBEAT_INTERVAL", 45*time.Second),
+		NodeProtocolsSupported:  csvListFromEnvOrDefault("NODE_PROTOCOLS_SUPPORTED", []string{"wireguard", "xray"}),
+		NodeRegistrationToken:   envOrDefault("NODE_REGISTRATION_TOKEN", ""),
+		NodeID:                  envOrDefault("NODE_ID", ""),
+		NodeToken:               envOrDefault("NODE_TOKEN", ""),
+		NodeRegion:              envOrDefault("NODE_REGION", ""),
+		NodePublicIP:            envOrDefault("NODE_PUBLIC_IP", ""),
+		NodeCapacity:            intFromEnv("NODE_CAPACITY", 0),
+		DailyChargeInterval:     durationFromEnv("DAILY_CHARGE_INTERVAL", 1*time.Hour),
+		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 800)),
 	}
 
 	if cfg.HTTPAddr == "" {
@@ -175,6 +201,15 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func intFromEnv(key string, fallback int) int {

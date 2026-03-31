@@ -108,3 +108,30 @@ PersistentKeepalive = %d
 	)
 	return cfg, nil
 }
+
+func (r *AmneziaWGRenderer) RenderXrayReality(in app.RenderXrayRealityInput) (string, error) {
+	if strings.TrimSpace(in.UserUUID) == "" || strings.TrimSpace(in.ServerHost) == "" || in.ServerPort <= 0 {
+		return "", fmt.Errorf("missing required fields for xray reality config")
+	}
+	return fmt.Sprintf(`{
+  "v":"2",
+  "ps":"%s",
+  "add":"%s",
+  "port":"%d",
+  "id":"%s",
+  "aid":"0",
+  "net":"tcp",
+  "type":"none",
+  "host":"",
+  "path":"",
+  "tls":"reality",
+  "sni":"%s"
+}`, in.DeviceID, in.ServerHost, in.ServerPort, in.UserUUID, fallback(in.ServerName, "www.cloudflare.com")), nil
+}
+
+func fallback(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
+}

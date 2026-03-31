@@ -13,9 +13,14 @@ import (
 type DialogueState string
 
 const (
-	StateIdle          DialogueState = "idle"
-	StateAwaitInvite   DialogueState = "await_invite"
-	StateAwaitDeleteOK DialogueState = "await_delete_ok"
+	StateIdle                    DialogueState = "idle"
+	StateAwaitingInviteCode      DialogueState = "awaiting_invite_code"
+	StateAwaitingAdminUserLookup DialogueState = "awaiting_admin_user_lookup"
+	StateAwaitingBalanceAdjust   DialogueState = "awaiting_balance_adjustment"
+	StateAwaitingConfirmReissue  DialogueState = "awaiting_confirm_reissue"
+	StateAwaitingConfirmBlock    DialogueState = "awaiting_confirm_block"
+	StateAwaitingConfirmUnblock  DialogueState = "awaiting_confirm_unblock"
+
 	StateAwaitBatchCnt DialogueState = "await_batch_count"
 	StateAwaitUserStat DialogueState = "await_user_stat"
 	StateAwaitRevokeID DialogueState = "await_revoke_id"

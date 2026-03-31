@@ -68,6 +68,7 @@ func (r *tcAccessRepo) MarkError(ctx context.Context, id string, failedAt time.T
 func (r *tcAccessRepo) SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error {
 	return nil
 }
+func (r *tcAccessRepo) ClearConfigBlobEncrypted(ctx context.Context, id string) error { return nil }
 func (r *tcAccessRepo) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
 }
@@ -80,6 +81,9 @@ func (r *tcAccessRepo) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID 
 		return nil, access.ErrNotFound
 	}
 	return item, nil
+}
+func (r *tcAccessRepo) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
+	return nil, nil
 }
 
 type tcTrafficRepo struct {
