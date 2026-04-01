@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -46,7 +47,9 @@ type ActivateInviteCode struct {
 }
 
 func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeInput) error {
+	slog.Info("activate_invite_code.start", "user_id", in.UserID, "invite_code", in.Code)
 	if !inviteCodeRegex.MatchString(in.Code) {
+		slog.Error("activate_invite_code.error", "user_id", in.UserID, "invite_code", in.Code, "error", ErrInvalidInviteCodeFormat)
 		return ErrInvalidInviteCodeFormat
 	}
 
@@ -55,7 +58,7 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		now = uc.Now().UTC()
 	}
 
-	return uc.Store.WithinTx(ctx, func(repos ActivateInviteCodeRepos) error {
+	err := uc.Store.WithinTx(ctx, func(repos ActivateInviteCodeRepos) error {
 		u, err := repos.Users().GetByID(ctx, in.UserID)
 		if err != nil {
 			if errors.Is(err, user.ErrNotFound) {
@@ -139,7 +142,13 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		if err != nil {
 			return fmt.Errorf("create audit log: %w", err)
 		}
+		slog.Info("activate_invite_code.success", "user_id", in.UserID, "invite_code", in.Code, "grant_id", accessGrant.ID)
 
 		return nil
 	})
+	if err != nil {
+		slog.Error("activate_invite_code.error", "user_id", in.UserID, "invite_code", in.Code, "error", err)
+		return err
+	}
+	return nil
 }

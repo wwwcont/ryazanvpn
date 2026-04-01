@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -26,6 +27,7 @@ type HTTPBotClient struct {
 }
 
 func (c *HTTPBotClient) SendMessage(ctx context.Context, chatID int64, text string, markup *InlineKeyboardMarkup) error {
+	slog.Info("telegram.send_message.start", "chat_id", chatID)
 	payload := map[string]any{
 		"chat_id": chatID,
 		"text":    text,
@@ -33,7 +35,12 @@ func (c *HTTPBotClient) SendMessage(ctx context.Context, chatID int64, text stri
 	if markup != nil {
 		payload["reply_markup"] = markup
 	}
-	return c.call(ctx, "sendMessage", payload)
+	if err := c.call(ctx, "sendMessage", payload); err != nil {
+		slog.Error("telegram.send_message.error", "chat_id", chatID, "error", err)
+		return err
+	}
+	slog.Info("telegram.send_message.success", "chat_id", chatID)
+	return nil
 }
 
 func (c *HTTPBotClient) AnswerCallbackQuery(ctx context.Context, callbackID string, text string) error {
@@ -42,6 +49,7 @@ func (c *HTTPBotClient) AnswerCallbackQuery(ctx context.Context, callbackID stri
 }
 
 func (c *HTTPBotClient) SendDocument(ctx context.Context, chatID int64, filename string, content []byte, caption string, markup *InlineKeyboardMarkup) error {
+	slog.Info("telegram.send_document.start", "chat_id", chatID, "filename", filename)
 	fields := map[string]string{
 		"chat_id": fmt.Sprintf("%d", chatID),
 	}
@@ -55,7 +63,12 @@ func (c *HTTPBotClient) SendDocument(ctx context.Context, chatID int64, filename
 		}
 		fields["reply_markup"] = string(raw)
 	}
-	return c.callMultipart(ctx, "sendDocument", fields, "document", filename, content)
+	if err := c.callMultipart(ctx, "sendDocument", fields, "document", filename, content); err != nil {
+		slog.Error("telegram.send_document.error", "chat_id", chatID, "filename", filename, "error", err)
+		return err
+	}
+	slog.Info("telegram.send_document.success", "chat_id", chatID, "filename", filename)
+	return nil
 }
 
 func (c *HTTPBotClient) SendPhoto(ctx context.Context, chatID int64, filename string, content []byte, caption string, markup *InlineKeyboardMarkup) error {

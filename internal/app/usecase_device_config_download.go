@@ -49,6 +49,7 @@ type IssueDeviceConfig struct {
 }
 
 func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInput) (*IssueDeviceConfigOutput, error) {
+	slog.Info("issue_device_config.start", "access_id", in.DeviceAccessID, "protocol", in.Protocol)
 	now := time.Now().UTC()
 	if uc.Now != nil {
 		now = uc.Now().UTC()
@@ -59,16 +60,19 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 
 	_, err := uc.Accesses.GetByID(ctx, in.DeviceAccessID)
 	if err != nil {
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
 		return nil, err
 	}
 	derivedPublicKey, err := wgkeys.DerivePublicKey(in.DevicePrivateKey)
 	if err != nil {
 		slog.Error("config keypair derivation failed", "device_access_id", in.DeviceAccessID, "error", err)
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
 		return nil, fmt.Errorf("derive public key from private key: %w", err)
 	}
 	if strings.TrimSpace(in.DevicePublicKey) != "" {
 		if err := wgkeys.ValidateKeyPair(in.DevicePrivateKey, in.DevicePublicKey); err != nil {
 			slog.Error("config keypair mismatch", "device_access_id", in.DeviceAccessID, "stored_public_key", in.DevicePublicKey, "derived_public_key", derivedPublicKey)
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
 			return nil, fmt.Errorf("device key mismatch: stored public key does not match private key")
 		}
 	}
@@ -106,20 +110,24 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		if strings.Contains(err.Error(), "missing required fields") {
 			slog.Error("config render input incomplete", "device_access_id", in.DeviceAccessID, "error", err)
 		}
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
 	slog.Info("config render input complete", "device_access_id", in.DeviceAccessID, "has_device_private_key", strings.TrimSpace(in.DevicePrivateKey) != "", "has_assigned_ip", strings.TrimSpace(in.AssignedIP) != "", "has_server_public_key", strings.TrimSpace(in.ServerPublicKey) != "", "has_endpoint_host", strings.TrimSpace(in.EndpointHost) != "", "endpoint_port", in.EndpointPort, "has_preshared_key", strings.TrimSpace(in.PresharedKey) != "")
 
 	encrypted, err := uc.Encryptor.Encrypt([]byte(cfg))
 	if err != nil {
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
 	if err := uc.Accesses.SetConfigBlobEncrypted(ctx, in.DeviceAccessID, encrypted); err != nil {
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
 
 	rawToken, err := randomToken()
 	if err != nil {
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
 	hash := hashToken(rawToken)
@@ -132,9 +140,11 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		ExpiresAt:      expiresAt,
 	})
 	if err != nil {
+		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
 	slog.Info("config download token created", "device_access_id", in.DeviceAccessID, "expires_at", expiresAt)
+	slog.Info("issue_device_config.success", "access_id", in.DeviceAccessID, "protocol", protocol, "expires_at", expiresAt)
 
 	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt, QRPayload: base64.StdEncoding.EncodeToString([]byte(cfg))}, nil
 }
