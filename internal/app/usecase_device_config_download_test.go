@@ -124,6 +124,73 @@ func (fakeRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error)
 	return "{\"protocol\":\"xray\"}", nil
 }
 
+type trackingRenderer struct {
+	amneziaCalls int
+	xrayCalls    int
+}
+
+func (r *trackingRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
+	r.amneziaCalls++
+	return "wg", nil
+}
+
+func (r *trackingRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	r.xrayCalls++
+	return "{\"id\":\"x\"}", nil
+}
+
+func TestIssueDeviceConfig_XrayDoesNotUseWGRenderer(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	renderer := &trackingRenderer{}
+	issue := IssueDeviceConfig{Accesses: accessRepo, Tokens: &cfgTokenRepo{}, Renderer: renderer, Encryptor: fakeEncryptor{}, Now: func() time.Time { return now }}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID: "a1",
+		Protocol:       "xray",
+		EndpointHost:   "x.example.com",
+		EndpointPort:   8443,
+		XrayServerName: "www.cloudflare.com",
+	})
+	if err != nil {
+		t.Fatalf("issue xray config failed: %v", err)
+	}
+	if renderer.amneziaCalls != 0 {
+		t.Fatalf("wg renderer must not be called for xray flow, calls=%d", renderer.amneziaCalls)
+	}
+	if renderer.xrayCalls != 1 {
+		t.Fatalf("xray renderer calls=%d, want 1", renderer.xrayCalls)
+	}
+}
+
+func TestIssueDeviceConfig_WireguardDoesNotUseXrayRenderer(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	renderer := &trackingRenderer{}
+	issue := IssueDeviceConfig{Accesses: accessRepo, Tokens: &cfgTokenRepo{}, Renderer: renderer, Encryptor: fakeEncryptor{}, Now: func() time.Time { return now }}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+	})
+	if err != nil {
+		t.Fatalf("issue wireguard config failed: %v", err)
+	}
+	if renderer.xrayCalls != 0 {
+		t.Fatalf("xray renderer must not be called for wireguard flow, calls=%d", renderer.xrayCalls)
+	}
+	if renderer.amneziaCalls != 1 {
+		t.Fatalf("wg renderer calls=%d, want 1", renderer.amneziaCalls)
+	}
+}
+
 type fakeEncryptor struct{}
 
 func (fakeEncryptor) Encrypt(plaintext []byte) ([]byte, error) {

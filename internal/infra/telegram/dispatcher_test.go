@@ -88,6 +88,30 @@ func TestInviteCodeActivatesAndSendsDocument(t *testing.T) {
 	}
 }
 
+func TestSendHealthLink_UsesXrayExporter(t *testing.T) {
+	bot := &fakeBot{}
+	xexp := &fakeXrayExporter{link: "vless://u@h:1?security=reality#x"}
+	svc := &TelegramService{
+		Bot:             bot,
+		Devices:         &fakeDevices{active: &device.Device{ID: "d1"}},
+		Accesses:        &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`)}}},
+		ConfigEncryptor: fakeEncryptor{},
+		XrayExporter:    xexp,
+		XrayPublicHost:  "x.example.com",
+		XrayRealityPort: 8443,
+		XrayServerName:  "www.cloudflare.com",
+		XrayShortID:     "0123456789abcdef",
+		XrayPublicKey:   "pub",
+	}
+	svc.sendHealthLink(context.Background(), 1, "u1")
+	if xexp.calls != 1 {
+		t.Fatalf("xray exporter should be called once, got %d", xexp.calls)
+	}
+	if len(bot.messages) == 0 || !strings.Contains(bot.messages[len(bot.messages)-1].text, "vless://") {
+		t.Fatalf("expected vless link message, got %+v", bot.messages)
+	}
+}
+
 type fakeBot struct{ messages []sentMessage }
 
 type sentMessage struct {
@@ -210,13 +234,20 @@ func (f *fakeDevices) AssignNode(ctx context.Context, id string, vpnNodeID strin
 }
 
 type fakeAccesses struct {
-	byID *access.DeviceAccess
+	byID    *access.DeviceAccess
+	byIDMap map[string]*access.DeviceAccess
+	actives []*access.DeviceAccess
 }
 
 func (f *fakeAccesses) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeAccesses) GetByID(ctx context.Context, id string) (*access.DeviceAccess, error) {
+	if f.byIDMap != nil {
+		if v, ok := f.byIDMap[id]; ok {
+			return v, nil
+		}
+	}
 	return f.byID, nil
 }
 func (f *fakeAccesses) Activate(ctx context.Context, id string, grantedAt time.Time) error {
@@ -231,6 +262,19 @@ func (f *fakeAccesses) SetConfigBlobEncrypted(ctx context.Context, id string, bl
 }
 func (f *fakeAccesses) ClearConfigBlobEncrypted(ctx context.Context, id string) error { return nil }
 func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
+	if f.actives != nil {
+		return f.actives, nil
+	}
+	if f.byID != nil {
+		return []*access.DeviceAccess{f.byID}, nil
+	}
+	if f.byIDMap != nil {
+		out := make([]*access.DeviceAccess, 0, len(f.byIDMap))
+		for _, item := range f.byIDMap {
+			out = append(out, item)
+		}
+		return out, nil
+	}
 	return []*access.DeviceAccess{}, nil
 }
 func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
@@ -244,6 +288,19 @@ type fakeEncryptor struct{}
 
 func (fakeEncryptor) Encrypt(v []byte) ([]byte, error) { return v, nil }
 func (fakeEncryptor) Decrypt(v []byte) ([]byte, error) { return v, nil }
+
+type fakeXrayExporter struct {
+	link  string
+	calls int
+}
+
+func (f *fakeXrayExporter) ExportVLESSReality(ctx context.Context, in app.ExportXrayRealityInput) (string, error) {
+	f.calls++
+	if f.link != "" {
+		return f.link, nil
+	}
+	return "vless://x", nil
+}
 
 func TestRandIntNRange(t *testing.T) {
 	for i := 0; i < 1000; i++ {

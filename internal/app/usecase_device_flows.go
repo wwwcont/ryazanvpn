@@ -62,6 +62,9 @@ type CreateDeviceForUser struct {
 	Keepalive          int
 	MTU                int
 	DefaultVPNAWG      DefaultVPNAWGFields
+	XrayPublicHost     string
+	XrayRealityPort    int
+	XrayRealitySNI     string
 	TokenTTL           time.Duration
 	SensitiveEncryptor EncryptionService
 }
@@ -277,21 +280,13 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		issuedToken = cfgOut.Token
 		issuedTokens["wireguard"] = cfgOut.Token
 		xrayCfgOut, xErr := uc.ConfigIssuer.Execute(ctx, IssueDeviceConfigInput{
-			DeviceAccessID:   createdXrayAccess.ID,
-			Protocol:         "xray",
-			DevicePrivateKey: privateKey,
-			DevicePublicKey:  publicKey,
-			ServerPublicKey:  serverPublicKey,
-			PresharedKey:     presharedKey,
-			AssignedIP:       assignedIP,
-			MTU:              uc.MTU,
-			DNS:              uc.DNS,
-			EndpointHost:     valueOrDefault(uc.EndpointHost, vpnHost),
-			EndpointPort:     valueOrDefaultInt(uc.EndpointPort, vpnPort),
-			Keepalive:        0,
-			AllowedIPs:       uc.ClientAllowedIPs,
-			AWG:              uc.DefaultVPNAWG,
-			TokenTTL:         uc.TokenTTL,
+			DeviceAccessID:  createdXrayAccess.ID,
+			Protocol:        "xray",
+			DevicePublicKey: publicKey,
+			EndpointHost:    valueOrDefault(uc.XrayPublicHost, valueOrDefault(uc.EndpointHost, vpnHost)),
+			EndpointPort:    valueOrDefaultInt(uc.XrayRealityPort, valueOrDefaultInt(uc.EndpointPort, vpnPort)),
+			XrayServerName:  uc.XrayRealitySNI,
+			TokenTTL:        uc.TokenTTL,
 		})
 		if xErr == nil {
 			issuedTokens["xray"] = xrayCfgOut.Token

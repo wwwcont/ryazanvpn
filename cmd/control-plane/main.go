@@ -127,6 +127,9 @@ func main() {
 					PublicEndpoint:   cfg.VPNServerPublicEndpoint,
 					ClientAllowedIPs: cfg.VPNClientAllowedIPs,
 					MTU:              cfg.VPNAWGMTU,
+					XrayPublicHost:   cfg.XrayPublicHost,
+					XrayRealityPort:  cfg.XrayRealityPort,
+					XrayRealitySNI:   cfg.XrayRealityServerName,
 					DefaultVPNAWG: app.DefaultVPNAWGFields{
 						Jc:   cfg.VPNAWGJc,
 						Jmin: cfg.VPNAWGJmin,
