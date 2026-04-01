@@ -62,6 +62,7 @@ services:
     build:
       context: .
       dockerfile: deploy/amneziawg-go/Dockerfile
+    env_file: [.env.single.generated]
     container_name: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
     restart: unless-stopped
     cap_add:
@@ -85,6 +86,7 @@ services:
 
   xray:
     image: teddysun/xray:1.8.24
+    env_file: [.env.single.generated]
     container_name: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
