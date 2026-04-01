@@ -27,7 +27,7 @@ services:
 
   xray:
     image: teddysun/xray:1.8.24
-    container_name: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
+    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
     environment:
@@ -56,7 +56,7 @@ services:
       DOCKER_BINARY_PATH: ${DOCKER_BINARY_PATH:-docker}
       AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
       AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
-      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
+      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     depends_on:
       amnezia-awg:
         condition: service_started
