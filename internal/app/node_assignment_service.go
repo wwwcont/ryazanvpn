@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
@@ -10,9 +11,14 @@ import (
 var ErrNoActiveNodes = errors.New("no active nodes available")
 var ErrNodeCapacityExceeded = errors.New("node capacity exceeded")
 
-type MinLoadNodeAssigner struct{}
+type MinLoadNodeAssigner struct {
+	SingleNodeID string
+}
 
 func (a MinLoadNodeAssigner) Assign(nodes []*node.Node) (*node.Node, error) {
+	if selected, done, err := a.assignSingleNode(nodes); done {
+		return selected, err
+	}
 	if len(nodes) == 0 {
 		return nil, ErrNoActiveNodes
 	}
@@ -38,6 +44,33 @@ func (a MinLoadNodeAssigner) Assign(nodes []*node.Node) (*node.Node, error) {
 		}
 	}
 	return best, nil
+}
+
+func (a MinLoadNodeAssigner) assignSingleNode(nodes []*node.Node) (*node.Node, bool, error) {
+	if strings.TrimSpace(a.SingleNodeID) == "" {
+		return nil, false, nil
+	}
+	configuredID := strings.TrimSpace(a.SingleNodeID)
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		if n.ID != configuredID {
+			if n.Status == node.StatusActive {
+				slog.Warn("single_node.assign.rejected_stale", "configured_node_id", configuredID, "stale_node_id", n.ID)
+			}
+			continue
+		}
+		if n.Status != node.StatusActive {
+			return nil, true, ErrNoActiveNodes
+		}
+		if n.UserCapacity > 0 && n.CurrentLoad >= n.UserCapacity {
+			return nil, true, ErrNodeCapacityExceeded
+		}
+		slog.Info("single_node.assign.selected", "node_id", n.ID)
+		return n, true, nil
+	}
+	return nil, true, ErrNoActiveNodes
 }
 
 func nodeSupportsProtocol(n *node.Node, protocol string) bool {

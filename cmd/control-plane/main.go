@@ -109,7 +109,7 @@ func main() {
 					KeyGenerator:  telegram.X25519KeyGenerator{},
 					PresharedKeys: telegram.X25519KeyGenerator{},
 					IPAllocator:   telegram.RedisIPAllocator{Redis: redisClient, SubnetCIDR: cfg.VPNSubnetCIDR},
-					NodeAssigner:  app.MinLoadNodeAssigner{},
+					NodeAssigner:  app.MinLoadNodeAssigner{SingleNodeID: cfg.NodeID},
 					CreatePeerExecutor: &app.ExecuteCreatePeerOperation{
 						Operations:         opRepo,
 						Accesses:           accessRepo,
@@ -293,6 +293,7 @@ func ensureSingleNode(ctx context.Context, logger *slog.Logger, pg *pgxpool.Pool
 	if cfg.NodeID == "" {
 		return
 	}
+	logger.Info("single_node.ensure.start", slog.String("node_id", cfg.NodeID))
 	nodeName := cfg.NodeName
 	if nodeName == "" {
 		nodeName = "single-node"
@@ -347,7 +348,77 @@ ON CONFLICT (id) DO UPDATE SET
 		logger.Error("ensure single node bootstrap failed", slog.Any("error", err), slog.String("node_id", cfg.NodeID))
 		return
 	}
-	logger.Info("single node ensured", slog.String("node_id", cfg.NodeID), slog.String("node_name", nodeName), slog.String("region", region), slog.String("endpoint", publicEndpoint), slog.String("endpoint_host", endpointHost), slog.Int("endpoint_port", endpointPort))
+	logger.Info("single_node.ensure.success", slog.String("node_id", cfg.NodeID), slog.String("node_name", nodeName), slog.String("region", region), slog.String("endpoint", publicEndpoint), slog.String("endpoint_host", endpointHost), slog.Int("endpoint_port", endpointPort))
+
+	deactivateRes, err := pg.Exec(ctx, `
+UPDATE vpn_nodes
+SET status='down', updated_at=NOW()
+WHERE id <> $1 AND status <> 'down'`, cfg.NodeID)
+	if err != nil {
+		logger.Error("single_node.ensure.deactivate_stale.failed", slog.String("node_id", cfg.NodeID), slog.Any("error", err))
+		return
+	}
+	logger.Info("single_node.ensure.deactivate_stale", slog.String("node_id", cfg.NodeID), slog.Int64("rows_affected", deactivateRes.RowsAffected()))
+
+	relinkedRes, err := pg.Exec(ctx, `
+WITH relocatable AS (
+	SELECT da.id
+	FROM device_accesses da
+	WHERE da.vpn_node_id <> $1
+	  AND da.status IN ('pending','active','suspended','error')
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM device_accesses cur
+		WHERE cur.device_id = da.device_id
+		  AND cur.vpn_node_id = $1
+		  AND cur.protocol = da.protocol
+	  )
+)
+UPDATE device_accesses da
+SET vpn_node_id = $1, updated_at = NOW()
+FROM relocatable
+WHERE da.id = relocatable.id`, cfg.NodeID)
+	if err != nil {
+		logger.Error("single_node.ensure.repair.relink_failed", slog.Any("error", err))
+		return
+	}
+
+	revokedRes, err := pg.Exec(ctx, `
+WITH stale AS (
+	SELECT da.id
+	FROM device_accesses da
+	WHERE da.vpn_node_id <> $1
+	  AND da.status IN ('pending','active','suspended','error')
+)
+UPDATE device_accesses da
+SET status='revoked', revoked_at=NOW(), updated_at=NOW()
+FROM stale
+WHERE da.id = stale.id`, cfg.NodeID)
+	if err != nil {
+		logger.Error("single_node.ensure.repair.revoke_failed", slog.Any("error", err))
+		return
+	}
+	if revokedRes.RowsAffected() > 0 {
+		_, _ = pg.Exec(ctx, `
+INSERT INTO audit_logs (entity_type, entity_id, action, details, created_at, updated_at)
+SELECT 'device_access', da.id, 'single_node_startup_repair_revoke',
+	jsonb_build_object('reason', 'stale_node_reference', 'current_node_id', $1, 'previous_node_id', da.vpn_node_id::text),
+	NOW(), NOW()
+FROM device_accesses da
+WHERE da.status='revoked' AND da.revoked_at >= NOW() - interval '1 minute' AND da.vpn_node_id <> $1`, cfg.NodeID)
+	}
+
+	var activeCount int
+	if err := pg.QueryRow(ctx, `SELECT COUNT(*) FROM vpn_nodes WHERE status = 'active'`).Scan(&activeCount); err != nil {
+		logger.Error("single_node.ensure.summary.failed", slog.Any("error", err))
+		return
+	}
+	logger.Info("single_node.ensure.summary",
+		slog.String("node_id", cfg.NodeID),
+		slog.Int("active_nodes", activeCount),
+		slog.Int64("relinked_accesses", relinkedRes.RowsAffected()),
+		slog.Int64("revoked_accesses", revokedRes.RowsAffected()),
+	)
 }
 
 func splitEndpointHostPort(endpoint string) (string, int, error) {
