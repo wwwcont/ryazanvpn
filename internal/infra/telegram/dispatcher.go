@@ -682,10 +682,42 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		}
 		selectedDeviceID = d.ID
 		for _, item := range actives {
-			if item != nil && strings.EqualFold(strings.TrimSpace(item.Protocol), "wireguard") {
-				accessID = item.ID
-				break
+			if item == nil || !strings.EqualFold(strings.TrimSpace(item.Protocol), "wireguard") {
+				continue
 			}
+			if len(item.ConfigBlobEncrypted) == 0 {
+				s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", "wireguard", "action", "skip_broken_access")
+				continue
+			}
+			accessID = item.ID
+			break
+		}
+		if accessID == "" {
+			s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", "", "protocol", "wireguard", "action", "recreate_device")
+			s.logInfo("telegram.config_regenerate.start", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "protocol", "wireguard")
+			for _, item := range actives {
+				if item == nil {
+					continue
+				}
+				_ = s.RevokeAccessUC.Execute(ctx, app.RevokeDeviceAccessInput{AccessID: item.ID})
+			}
+			_ = s.Devices.Revoke(ctx, d.ID)
+			out, createErr := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
+			if createErr != nil {
+				s.logInfo("telegram.config_regenerate.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "protocol", "wireguard", "error", createErr)
+				s.logErr("recreate device for empty config blob", createErr)
+				s.sendErrorReplyMessage(chatID, "Не удалось перевыпустить доступ. Попробуйте позже.", nil, "user_id", userID, "device_id", d.ID)
+				return
+			}
+			if out.Device != nil {
+				selectedDeviceID = out.Device.ID
+			}
+			if out.AccessByProtocol != nil && out.AccessByProtocol["wireguard"] != nil {
+				accessID = out.AccessByProtocol["wireguard"].ID
+			} else if out.Access != nil {
+				accessID = out.Access.ID
+			}
+			s.logInfo("telegram.config_regenerate.success", "chat_id", chatID, "user_id", userID, "device_id", selectedDeviceID, "access_id", accessID, "protocol", "wireguard")
 		}
 		if accessID == "" {
 			s.sendErrorReplyMessage(chatID, "Нет активного Speed-доступа (wireguard).", nil, "user_id", userID)
@@ -1065,6 +1097,7 @@ func (s *TelegramService) issueDownloadToken(ctx context.Context, accessID strin
 		return "", err
 	}
 	if len(acc.ConfigBlobEncrypted) == 0 {
+		s.logInfo("telegram.config_blob.empty", "access_id", accessID, "action", "token_issue_blocked")
 		return "", fmt.Errorf("config not ready for access_id=%s: encrypted blob is empty", accessID)
 	}
 	if s.TokenTTL <= 0 {
@@ -1262,9 +1295,14 @@ func (s *TelegramService) resolveProtocolAccess(ctx context.Context, userID, pro
 	}
 	want := strings.TrimSpace(protocol)
 	for _, item := range actives {
-		if item != nil && strings.EqualFold(strings.TrimSpace(item.Protocol), want) {
-			return d, item, nil
+		if item == nil || !strings.EqualFold(strings.TrimSpace(item.Protocol), want) {
+			continue
 		}
+		if len(item.ConfigBlobEncrypted) == 0 {
+			s.logInfo("telegram.config_blob.empty", "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", protocol, "action", "skip_broken_access")
+			continue
+		}
+		return d, item, nil
 	}
 	return nil, nil, fmt.Errorf("active access with protocol=%s is missing", protocol)
 }
@@ -1279,9 +1317,22 @@ func (s *TelegramService) resolveActiveAccessIDByProtocol(ctx context.Context, u
 		return "", fmt.Errorf("active access is missing for device_id=%s", d.ID)
 	}
 	if strings.TrimSpace(protocol) == "" {
-		return actives[0].ID, nil
+		for _, item := range actives {
+			if item != nil && len(item.ConfigBlobEncrypted) > 0 {
+				return item.ID, nil
+			}
+		}
+		s.logInfo("telegram.config_blob.empty", "user_id", userID, "protocol", protocol, "action", "resolve_active_access_failed")
+		return "", fmt.Errorf("active access has empty config blob")
 	}
 	for _, item := range actives {
+		if item == nil || !strings.EqualFold(strings.TrimSpace(item.Protocol), strings.TrimSpace(protocol)) {
+			continue
+		}
+		if len(item.ConfigBlobEncrypted) == 0 {
+			s.logInfo("telegram.config_blob.empty", "user_id", userID, "access_id", item.ID, "protocol", protocol, "action", "skip_broken_access")
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(item.Protocol), strings.TrimSpace(protocol)) {
 			return item.ID, nil
 		}
@@ -1295,6 +1346,7 @@ func (s *TelegramService) loadConfigPlaintext(ctx context.Context, accessID stri
 		return "", err
 	}
 	if len(acc.ConfigBlobEncrypted) == 0 {
+		s.logInfo("telegram.config_blob.empty", "access_id", accessID, "action", "plaintext_load_blocked")
 		return "", fmt.Errorf("config not ready for access_id=%s: encrypted blob is empty", accessID)
 	}
 	if s.ConfigEncryptor == nil {
