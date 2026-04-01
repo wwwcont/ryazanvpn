@@ -11,6 +11,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/access"
 	"github.com/wwwcont/ryazanvpn/internal/domain/accessgrant"
 	"github.com/wwwcont/ryazanvpn/internal/domain/device"
+	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
 )
 
@@ -234,9 +235,11 @@ func (f *fakeDevices) AssignNode(ctx context.Context, id string, vpnNodeID strin
 }
 
 type fakeAccesses struct {
-	byID    *access.DeviceAccess
-	byIDMap map[string]*access.DeviceAccess
-	actives []*access.DeviceAccess
+	byID        *access.DeviceAccess
+	byIDMap     map[string]*access.DeviceAccess
+	actives     []*access.DeviceAccess
+	clearedIDs  []string
+	setBlobByID map[string][]byte
 }
 
 func (f *fakeAccesses) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
@@ -258,9 +261,24 @@ func (f *fakeAccesses) MarkError(ctx context.Context, id string, failedAt time.T
 	return nil
 }
 func (f *fakeAccesses) SetConfigBlobEncrypted(ctx context.Context, id string, blob []byte) error {
+	if f.setBlobByID == nil {
+		f.setBlobByID = map[string][]byte{}
+	}
+	f.setBlobByID[id] = append([]byte(nil), blob...)
 	return nil
 }
-func (f *fakeAccesses) ClearConfigBlobEncrypted(ctx context.Context, id string) error { return nil }
+func (f *fakeAccesses) ClearConfigBlobEncrypted(ctx context.Context, id string) error {
+	f.clearedIDs = append(f.clearedIDs, id)
+	if f.byID != nil && f.byID.ID == id {
+		f.byID.ConfigBlobEncrypted = nil
+	}
+	if f.byIDMap != nil {
+		if item, ok := f.byIDMap[id]; ok {
+			item.ConfigBlobEncrypted = nil
+		}
+	}
+	return nil
+}
 func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	if f.actives != nil {
 		return f.actives, nil
@@ -302,11 +320,60 @@ func (f *fakeXrayExporter) ExportVLESSReality(ctx context.Context, in app.Export
 	return "vless://x", nil
 }
 
+type fakeNodes struct {
+	byID map[string]*node.Node
+}
+
+func (f *fakeNodes) ListActive(ctx context.Context) ([]*node.Node, error) {
+	out := make([]*node.Node, 0, len(f.byID))
+	for _, n := range f.byID {
+		out = append(out, n)
+	}
+	return out, nil
+}
+func (f *fakeNodes) GetByID(ctx context.Context, id string) (*node.Node, error) {
+	if f.byID == nil {
+		return nil, node.ErrNotFound
+	}
+	if n, ok := f.byID[id]; ok {
+		return n, nil
+	}
+	return nil, node.ErrNotFound
+}
+func (f *fakeNodes) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
+	return nil
+}
+func (f *fakeNodes) UpdateLoad(ctx context.Context, id string, currentLoad int) error { return nil }
+
 func TestRandIntNRange(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		v := randIntN(10000)
 		if v < 0 || v >= 10000 {
 			t.Fatalf("randIntN out of range: %d", v)
 		}
+	}
+}
+
+func TestLoadConfigPlaintext_RejectsStaleWireguardServerKey(t *testing.T) {
+	accRepo := &fakeAccesses{
+		byID: &access.DeviceAccess{
+			ID:                  "a1",
+			Protocol:            "wireguard",
+			VPNNodeID:           "n1",
+			ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = p\n[Peer]\nPublicKey = staleKey=\n"),
+		},
+	}
+	svc := &TelegramService{
+		Accesses:        accRepo,
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
+		ConfigEncryptor: fakeEncryptor{},
+	}
+
+	_, err := svc.loadConfigPlaintext(context.Background(), "a1")
+	if err == nil {
+		t.Fatal("expected stale config error")
+	}
+	if len(accRepo.clearedIDs) != 1 || accRepo.clearedIDs[0] != "a1" {
+		t.Fatalf("expected stale blob to be cleared, got %+v", accRepo.clearedIDs)
 	}
 }

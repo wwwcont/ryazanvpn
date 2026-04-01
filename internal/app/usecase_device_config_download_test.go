@@ -118,7 +118,7 @@ func (r *cfgTokenRepo) RevokeIssuedByAccessID(ctx context.Context, deviceAccessI
 type fakeRenderer struct{}
 
 func (fakeRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
-	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey, nil
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\n", nil
 }
 func (fakeRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
 	return "{\"protocol\":\"xray\"}", nil
@@ -131,7 +131,7 @@ type trackingRenderer struct {
 
 func (r *trackingRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
 	r.amneziaCalls++
-	return "wg", nil
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\n", nil
 }
 
 func (r *trackingRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
@@ -189,6 +189,43 @@ func TestIssueDeviceConfig_WireguardDoesNotUseXrayRenderer(t *testing.T) {
 	if renderer.amneziaCalls != 1 {
 		t.Fatalf("wg renderer calls=%d, want 1", renderer.amneziaCalls)
 	}
+}
+
+func TestIssueDeviceConfig_RejectsRenderedServerPublicKeyMismatch(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	issue := IssueDeviceConfig{
+		Accesses:  accessRepo,
+		Tokens:    &cfgTokenRepo{},
+		Renderer:  mismatchServerKeyRenderer{},
+		Encryptor: fakeEncryptor{},
+		Now:       func() time.Time { return now },
+	}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "expectedSrv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+	})
+	if err == nil {
+		t.Fatal("expected rendered server key mismatch error")
+	}
+}
+
+type mismatchServerKeyRenderer struct{}
+
+func (mismatchServerKeyRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = wrongSrv\n", nil
+}
+
+func (mismatchServerKeyRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	return "{\"protocol\":\"xray\"}", nil
 }
 
 type fakeEncryptor struct{}

@@ -60,7 +60,7 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		in.TokenTTL = 15 * time.Minute
 	}
 
-	_, err := uc.Accesses.GetByID(ctx, in.DeviceAccessID)
+	acc, err := uc.Accesses.GetByID(ctx, in.DeviceAccessID)
 	if err != nil {
 		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
 		return nil, err
@@ -89,6 +89,8 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 			UserUUID:     userUUID,
 		})
 	case "wireguard":
+		slog.Info("wg.config.render.access_id", "access_id", in.DeviceAccessID)
+		slog.Info("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "server_public_key", strings.TrimSpace(in.ServerPublicKey))
 		derivedPublicKey, derErr := wgkeys.DerivePublicKey(in.DevicePrivateKey)
 		if derErr != nil {
 			slog.Error("config keypair derivation failed", "device_access_id", in.DeviceAccessID, "error", derErr)
@@ -125,6 +127,21 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
 	}
+	if protocol == "wireguard" {
+		renderedServerPublicKey, parseErr := extractWireguardPeerPublicKey(cfg)
+		if parseErr != nil {
+			slog.Error("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "error", parseErr)
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", parseErr)
+			return nil, parseErr
+		}
+		expected := strings.TrimSpace(in.ServerPublicKey)
+		if expected != "" && !strings.EqualFold(renderedServerPublicKey, expected) {
+			err = fmt.Errorf("rendered wireguard server public key mismatch: rendered=%q expected=%q", renderedServerPublicKey, expected)
+			slog.Error("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "error", err)
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
+			return nil, err
+		}
+	}
 	slog.Info("config render input complete", "device_access_id", in.DeviceAccessID, "has_device_private_key", strings.TrimSpace(in.DevicePrivateKey) != "", "has_assigned_ip", strings.TrimSpace(in.AssignedIP) != "", "has_server_public_key", strings.TrimSpace(in.ServerPublicKey) != "", "has_endpoint_host", strings.TrimSpace(in.EndpointHost) != "", "endpoint_port", in.EndpointPort, "has_preshared_key", strings.TrimSpace(in.PresharedKey) != "")
 
 	encrypted, err := uc.Encryptor.Encrypt([]byte(cfg))
@@ -135,6 +152,9 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	if err := uc.Accesses.SetConfigBlobEncrypted(ctx, in.DeviceAccessID, encrypted); err != nil {
 		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 		return nil, err
+	}
+	if protocol == "wireguard" {
+		slog.Info("wg.config.render.blob_regenerated", "access_id", in.DeviceAccessID, "value", len(acc.ConfigBlobEncrypted) > 0)
 	}
 
 	rawToken, err := randomToken()
@@ -159,6 +179,36 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	slog.Info("issue_device_config.success", "access_id", in.DeviceAccessID, "protocol", protocol, "expires_at", expiresAt)
 
 	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt, QRPayload: base64.StdEncoding.EncodeToString([]byte(cfg))}, nil
+}
+
+func extractWireguardPeerPublicKey(config string) (string, error) {
+	inPeerSection := false
+	for _, raw := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inPeerSection = strings.EqualFold(line, "[Peer]")
+			continue
+		}
+		if !inPeerSection {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(line), "publickey") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid wireguard public key line")
+		}
+		key := strings.TrimSpace(parts[1])
+		if key == "" {
+			return "", fmt.Errorf("wireguard peer public key is empty")
+		}
+		return key, nil
+	}
+	return "", fmt.Errorf("wireguard peer public key not found in rendered config")
 }
 
 type DownloadDeviceConfigByToken struct {

@@ -409,19 +409,13 @@ func (r *AmneziaDockerRuntime) logAmneziaListenPort(ctx context.Context) error {
 	return nil
 }
 
-type xrayConfig struct {
-	Inbounds []struct {
-		Protocol string `json:"protocol"`
-		Settings struct {
-			Clients []map[string]any `json:"clients"`
-		} `json:"settings"`
-	} `json:"inbounds"`
-}
+var canonicalUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOperationRequest) error {
-	uuid := strings.TrimSpace(req.PeerPublicKey)
-	if uuid == "" {
-		return errors.New("xray client uuid is empty")
+	uuid, err := normalizeXrayUUID(req.PeerPublicKey)
+	if err != nil {
+		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
 	}
 	if strings.TrimSpace(r.cfg.XrayContainer) == "" {
 		return errors.New("xray container is empty")
@@ -441,32 +435,65 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
 	}
-	var cfg xrayConfig
+	var cfg map[string]any
 	if err := json.Unmarshal([]byte(out.Stdout), &cfg); err != nil {
 		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
 	}
+	inbounds, ok := cfg["inbounds"].([]any)
+	if !ok {
+		err := errors.New("xray config inbounds is missing or invalid")
+		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
 	updated := false
-	for i := range cfg.Inbounds {
-		if !strings.EqualFold(strings.TrimSpace(cfg.Inbounds[i].Protocol), "vless") {
+	for i := range inbounds {
+		inbound, ok := inbounds[i].(map[string]any)
+		if !ok {
 			continue
 		}
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") {
+			continue
+		}
+		settings, ok := inbound["settings"].(map[string]any)
+		if !ok {
+			settings = map[string]any{}
+			inbound["settings"] = settings
+		}
+		clients, ok := settings["clients"].([]any)
+		if !ok {
+			clients = []any{}
+		}
 		exists := false
-		for _, c := range cfg.Inbounds[i].Settings.Clients {
+		for _, rawClient := range clients {
+			c, ok := rawClient.(map[string]any)
+			if !ok {
+				continue
+			}
 			if id, ok := c["id"].(string); ok && strings.EqualFold(strings.TrimSpace(id), uuid) {
 				exists = true
 				break
 			}
 		}
 		if !exists {
-			cfg.Inbounds[i].Settings.Clients = append(cfg.Inbounds[i].Settings.Clients, map[string]any{"id": uuid})
+			clients = append(clients, map[string]any{"id": uuid})
+			settings["clients"] = clients
+			inbounds[i] = inbound
 			updated = true
 		}
 	}
+	cfg["inbounds"] = inbounds
 	if !updated {
 		r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
 		return nil
 	}
+	r.log("xray.config.validation.start", slog.String("operation_id", req.OperationID))
+	if err := validateXrayConfig(cfg); err != nil {
+		r.log("xray.config.validation.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	r.log("xray.config.validation.success", slog.String("operation_id", req.OperationID))
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
@@ -499,6 +526,57 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 	r.log("xray.config.reload.success", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer))
 	r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", false))
 	return nil
+}
+
+func normalizeXrayUUID(raw string) (string, error) {
+	uuid := strings.TrimSpace(raw)
+	if uuid == "" {
+		return "", errors.New("xray client uuid is empty")
+	}
+	if !canonicalUUIDPattern.MatchString(uuid) {
+		return "", fmt.Errorf("xray client id must be a canonical UUID, got %q", raw)
+	}
+	return strings.ToLower(uuid), nil
+}
+
+func validateXrayConfig(cfg map[string]any) error {
+	inbounds, ok := cfg["inbounds"].([]any)
+	if !ok || len(inbounds) == 0 {
+		return errors.New("xray config validation failed: inbounds must be a non-empty array")
+	}
+	for i, rawInbound := range inbounds {
+		inbound, ok := rawInbound.(map[string]any)
+		if !ok {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") {
+			continue
+		}
+		if _, ok := inbound["port"]; !ok {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].port is required", i)
+		}
+		settings, ok := inbound["settings"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].settings is required", i)
+		}
+		if _, ok := settings["clients"].([]any); !ok {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].settings.clients must be an array", i)
+		}
+		streamSettings, ok := inbound["streamSettings"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].streamSettings is required", i)
+		}
+		if !strings.EqualFold(strings.TrimSpace(asString(streamSettings["security"])), "reality") {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].streamSettings.security must be reality", i)
+		}
+		return nil
+	}
+	return errors.New("xray config validation failed: vless inbound not found")
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func (r *AmneziaDockerRuntime) writeLocalTemp(content []byte) (string, error) {
