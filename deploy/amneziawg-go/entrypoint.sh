@@ -5,6 +5,8 @@ IFACE="${AMNEZIA_INTERFACE_NAME:-awg0}"
 CONF_DIR="${AMNEZIA_CONFIG_DIR:-/etc/amnezia}"
 CONFIG_PATH="${AMNEZIA_CONFIG_PATH:-}"
 KEEP_UP="${AMNEZIA_KEEP_INTERFACE_UP:-1}"
+SOCK_DIR="/var/run/amneziawg"
+SOCK_PATH="${SOCK_DIR}/${IFACE}.sock"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -33,7 +35,7 @@ create_default_config() {
   fi
 
   mkdir -p "$CONF_DIR"
-  private_key="$(wg genkey)"
+  private_key="$(awg genkey)"
   umask 077
   cat > "$default_conf" <<EOF
 [Interface]
@@ -56,7 +58,7 @@ extract_addresses() {
         split(line, kv, "=")
         value = kv[2]
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-        n = split(value, arr, /,/) 
+        n = split(value, arr, /,/)
         for (i = 1; i <= n; i++) {
           addr = arr[i]
           gsub(/^[[:space:]]+|[[:space:]]+$/, "", addr)
@@ -67,17 +69,27 @@ extract_addresses() {
   ' "$conf"
 }
 
-create_interface() {
-  if ip link show "$IFACE" >/dev/null 2>&1; then
-    return
-  fi
+wait_for_runtime() {
+  i=0
+  while [ $i -lt 50 ]; do
+    if [ -S "$SOCK_PATH" ] || ip link show "$IFACE" >/dev/null 2>&1; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 0.2
+  done
 
-  ip link add "$IFACE" type wireguard 2>/dev/null \
+  echo "amneziawg-go runtime did not become ready for $IFACE" >&2
+  return 1
+}
 
-  if ! ip link show "$IFACE" >/dev/null 2>&1; then
-    echo "failed to create interface $IFACE (neither amneziawg nor wireguard type available)" >&2
-    exit 1
-  fi
+start_runtime() {
+  mkdir -p "$SOCK_DIR"
+  AMNEZIAWG_PROCESS_FOREGROUND=1 LOG_LEVEL="${LOG_LEVEL:-info}" \
+    /usr/local/bin/amneziawg-go -f "$IFACE" &
+  RUNTIME_PID=$!
+  export RUNTIME_PID
+  wait_for_runtime
 }
 
 apply_config() {
@@ -93,26 +105,29 @@ apply_config() {
 }
 
 shutdown() {
-  if [ "$KEEP_UP" = "1" ]; then
-    return
+  if [ "${RUNTIME_PID:-}" != "" ]; then
+    kill "$RUNTIME_PID" 2>/dev/null || true
+    wait "$RUNTIME_PID" 2>/dev/null || true
   fi
-  ip link del "$IFACE" 2>/dev/null || true
+
+  if [ "$KEEP_UP" != "1" ]; then
+    ip link del "$IFACE" 2>/dev/null || true
+    rm -f "$SOCK_PATH" 2>/dev/null || true
+  fi
 }
 
 main() {
-  create_interface
-
   conf="$(find_config || true)"
-  if [ -n "$conf" ]; then
-    apply_config "$conf"
-  else
-    echo "kernel-backed awg runtime: config not found in $CONF_DIR; generating minimal bootstrap config" >&2
+  if [ -z "$conf" ]; then
+    echo "config not found in $CONF_DIR; generating minimal bootstrap config" >&2
     conf="$(create_default_config)"
-    apply_config "$conf"
   fi
 
+  start_runtime
+  apply_config "$conf"
+
   trap 'shutdown; exit 0' INT TERM
-  while :; do sleep 3600; done
+  wait "$RUNTIME_PID"
 }
 
 main "$@"
