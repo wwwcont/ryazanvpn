@@ -67,23 +67,29 @@ type CreateDeviceForUser struct {
 }
 
 func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUserInput) (*CreateDeviceForUserOutput, error) {
+	slog.Info("create_device_for_user.start", "user_id", in.UserID)
 	if uc.Users != nil {
 		u, err := uc.Users.GetByID(ctx, in.UserID)
 		if err != nil {
+			slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 			return nil, err
 		}
 		if strings.EqualFold(u.Status, user.StatusBlocked) {
+			slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", ErrInsufficientBalance)
 			return nil, ErrInsufficientBalance
 		}
 	}
 	if existing, err := uc.Devices.GetActiveByUserID(ctx, in.UserID); err == nil && existing != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", ErrUserAlreadyHasActiveDevice)
 		return nil, ErrUserAlreadyHasActiveDevice
 	} else if err != nil && !errors.Is(err, device.ErrNotFound) {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 		return nil, err
 	}
 
 	publicKey, privateKey, err := uc.KeyGenerator.Generate(ctx)
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 		return nil, err
 	}
 	if err := wgkeys.ValidateKeyPair(privateKey, publicKey); err != nil {
@@ -103,20 +109,24 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 
 	activeNodes, err := uc.Nodes.ListActive(ctx)
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 		return nil, err
 	}
 
 	selectedNode, err := uc.NodeAssigner.Assign(activeNodes)
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 		return nil, err
 	}
 
 	assignedIP, err := uc.IPAllocator.Allocate(ctx, selectedNode.ID)
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "node_id", selectedNode.ID, "error", err)
 		return nil, err
 	}
 	presharedKey, err := uc.generatePresharedKey(ctx)
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "node_id", selectedNode.ID, "error", err)
 		return nil, err
 	}
 	presharedForPayload := presharedKey
@@ -137,6 +147,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		Status:    device.StatusActive,
 	})
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
 	slog.Info("device created", "user_id", in.UserID, "device_id", createdDevice.ID, "node_id", selectedNode.ID)
@@ -149,6 +160,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		AssignedIP: &assignedIP,
 	})
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
 	slog.Info("device access created", "device_id", createdDevice.ID, "access_id", createdAccess.ID, "assigned_ip", assignedIP)
@@ -160,6 +172,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		AssignedIP: &assignedIP,
 	})
 	if err != nil {
+		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
 
@@ -258,6 +271,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			TokenTTL:         uc.TokenTTL,
 		})
 		if err != nil {
+			slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "access_id", createdAccess.ID, "node_id", selectedNode.ID, "error", err)
 			return nil, err
 		}
 		issuedToken = cfgOut.Token
@@ -284,7 +298,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		}
 	}
 
-	return &CreateDeviceForUserOutput{
+	out := &CreateDeviceForUserOutput{
 		Device:              createdDevice,
 		Access:              createdAccess,
 		AccessByProtocol:    map[string]*access.DeviceAccess{"wireguard": createdAccess, "xray": createdXrayAccess},
@@ -292,7 +306,9 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		Node:                selectedNode,
 		ConfigDownloadToken: issuedToken,
 		ConfigTokens:        issuedTokens,
-	}, nil
+	}
+	slog.Info("create_device_for_user.success", "user_id", in.UserID, "device_id", createdDevice.ID, "access_id", createdAccess.ID, "node_id", selectedNode.ID)
+	return out, nil
 }
 
 func (uc CreateDeviceForUser) generatePresharedKey(ctx context.Context) (string, error) {

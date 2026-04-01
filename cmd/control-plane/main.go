@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -289,9 +292,21 @@ func ensureSingleNode(ctx context.Context, logger *slog.Logger, pg *pgxpool.Pool
 	if region == "" {
 		region = "single-server"
 	}
-	publicIP := cfg.NodePublicIP
-	if publicIP == "" {
-		publicIP = "127.0.0.1"
+	publicEndpoint := strings.TrimSpace(cfg.VPNServerPublicEndpoint)
+	serverPublicKey := strings.TrimSpace(cfg.VPNServerPublicKey)
+	if publicEndpoint == "" || serverPublicKey == "" {
+		logger.Error(
+			"ensure single node bootstrap skipped: VPN_SERVER_PUBLIC_ENDPOINT and VPN_SERVER_PUBLIC_KEY are required",
+			slog.String("node_id", cfg.NodeID),
+			slog.Bool("has_vpn_server_public_endpoint", publicEndpoint != ""),
+			slog.Bool("has_vpn_server_public_key", serverPublicKey != ""),
+		)
+		return
+	}
+	endpointHost, endpointPort, err := splitEndpointHostPort(publicEndpoint)
+	if err != nil {
+		logger.Error("ensure single node bootstrap skipped: invalid VPN_SERVER_PUBLIC_ENDPOINT", slog.String("node_id", cfg.NodeID), slog.String("vpn_server_public_endpoint", publicEndpoint), slog.Any("error", err))
+		return
 	}
 	agentBaseURL := cfg.NodeAgentBaseURL
 	if agentBaseURL == "" {
@@ -302,14 +317,14 @@ func ensureSingleNode(ctx context.Context, logger *slog.Logger, pg *pgxpool.Pool
 		capacity = 40
 	}
 	meta, _ := json.Marshal(map[string]any{"protocols_supported": cfg.NodeProtocolsSupported, "bootstrapped_by": "control-plane"})
-	_, err := pg.Exec(ctx, `
+	_, err = pg.Exec(ctx, `
 INSERT INTO vpn_nodes (
 	id, name, region, status, user_capacity, agent_base_url, vpn_endpoint,
 	vpn_endpoint_host, vpn_endpoint_port, server_public_key, vpn_subnet_cidr,
 	runtime_metadata, last_seen_at, created_at, updated_at
 ) VALUES (
-	$1, $2, $3, 'active', $4, $5, $6 || ':41475', $6, 41475,
-	'', '10.8.1.0/24', $7::jsonb, NOW(), NOW(), NOW()
+	$1, $2, $3, 'active', $4, $5, $6, $7, $8,
+	$9, '10.8.1.0/24', $10::jsonb, NOW(), NOW(), NOW()
 )
 ON CONFLICT (id) DO UPDATE SET
 	name=COALESCE(NULLIF(EXCLUDED.name,''), vpn_nodes.name),
@@ -318,10 +333,36 @@ ON CONFLICT (id) DO UPDATE SET
 	agent_base_url=COALESCE(NULLIF(EXCLUDED.agent_base_url,''), vpn_nodes.agent_base_url),
 	runtime_metadata=EXCLUDED.runtime_metadata,
 	status='active',
-	updated_at=NOW()`, cfg.NodeID, nodeName, region, capacity, agentBaseURL, publicIP, string(meta))
+	updated_at=NOW()`, cfg.NodeID, nodeName, region, capacity, agentBaseURL, publicEndpoint, endpointHost, endpointPort, serverPublicKey, string(meta))
 	if err != nil {
 		logger.Error("ensure single node bootstrap failed", slog.Any("error", err), slog.String("node_id", cfg.NodeID))
 		return
 	}
-	logger.Info("single node ensured", slog.String("node_id", cfg.NodeID), slog.String("node_name", nodeName), slog.String("region", region), slog.String("endpoint", fmt.Sprintf("%s:41475", publicIP)))
+	logger.Info("single node ensured", slog.String("node_id", cfg.NodeID), slog.String("node_name", nodeName), slog.String("region", region), slog.String("endpoint", publicEndpoint), slog.String("endpoint_host", endpointHost), slog.Int("endpoint_port", endpointPort))
+}
+
+func splitEndpointHostPort(endpoint string) (string, int, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", 0, fmt.Errorf("endpoint is empty")
+	}
+	host, rawPort, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		if strings.Count(endpoint, ":") == 1 {
+			parts := strings.SplitN(endpoint, ":", 2)
+			host = strings.TrimSpace(parts[0])
+			rawPort = strings.TrimSpace(parts[1])
+		} else {
+			return "", 0, fmt.Errorf("expected host:port, got %q", endpoint)
+		}
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", 0, fmt.Errorf("host is empty")
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port <= 0 || port > 65535 {
+		return "", 0, fmt.Errorf("invalid port %q", rawPort)
+	}
+	return host, port, nil
 }
