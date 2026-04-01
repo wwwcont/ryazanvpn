@@ -16,13 +16,15 @@
       "streamSettings": {
         "network": "tcp",
         "security": "reality",
+        "decryption": "none",
         "realitySettings": {
           "show": false,
           "dest": "www.cloudflare.com:443",
           "xver": 0,
           "serverNames": ["www.cloudflare.com"],
           "privateKey": "cF_J5Du_-PJ_gHC5eAUspcaPskBqDOZ0CsVClUppjGA",
-          "shortIds": ["0123456789abcdef"]
+          "shortIds": ["0123456789abcdef"],
+          "decryption": "none"
         }
       }
     }
