@@ -29,7 +29,7 @@ services:
     image: teddysun/xray:1.8.24
     container_name: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
     restart: unless-stopped
-    command: ["run", "-config", "/etc/xray/config.json"]
+    command: ["xray", "run", "-config", "/etc/xray/config.json"]
     environment:
       - TZ=${TZ:-UTC}
     volumes:
