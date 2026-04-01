@@ -87,7 +87,7 @@ services:
   xray:
     image: teddysun/xray:1.8.24
     env_file: [.env.single.generated]
-    container_name: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
+    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
     volumes:
@@ -114,7 +114,7 @@ services:
       RUNTIME_ADAPTER: ${RUNTIME_ADAPTER:-amnezia_docker}
       AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
       AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
-      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
+      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     ports:
       - "8081:8081"
     depends_on:

@@ -29,17 +29,20 @@
 
 Симптомы:
 - `error while interpolating services.xray.container_name: required variable XRAY_CONTAINER_NAME is missing a value`;
-- при этом переменная есть в `.env.node.generated` / `.env.single.generated`.
+- чаще возникает при запуске compose без `--env-file`.
 
 Причина:
 - Docker Compose подставляет `${...}` только из текущего окружения, файла `.env` или `--env-file`;
 - `env_file:` внутри сервиса **не** участвует в интерполяции compose.
 
+Что изменено:
+- для `xray` добавлен безопасный дефолт `XRAY_CONTAINER_NAME=ryazanvpn-xray`, поэтому single/node compose теперь стартуют и без этой переменной.
+
 Что делать:
-1. Запускайте compose c env-файлом явно:
+1. Если нужно нестандартное имя контейнера, запускайте compose c env-файлом явно:
    - `docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build`
    - `docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build`
-2. Проверьте, что в используемом env-файле есть `XRAY_CONTAINER_NAME=...` без лишних пробелов/кавычек.
+2. Либо экспортируйте переменную в shell перед запуском: `export XRAY_CONTAINER_NAME=my-xray`.
 
 ## node-agent cannot exec docker
 
