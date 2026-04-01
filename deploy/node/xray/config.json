@@ -10,7 +10,8 @@
       "port": 8443,
       "protocol": "vless",
       "settings": {
-        "clients": []
+        "clients": [],
+        "decryption": "none"
       },
       "streamSettings": {
         "network": "tcp",
