@@ -375,7 +375,7 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
 		defer cancel()
 		if err := rt.Health(healthCtx); err != nil {
-			return nil, err
+			logger.Warn("runtime health check failed on startup; continuing in degraded mode", slog.Any("error", err))
 		}
 		return rt, nil
 	}
@@ -414,7 +414,7 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
 		defer cancel()
 		if err := rt.Health(healthCtx); err != nil {
-			return nil, err
+			logger.Warn("runtime health check failed on startup; continuing in degraded mode", slog.Any("error", err))
 		}
 		return rt, nil
 	}

@@ -596,7 +596,11 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 			nodeID = out.Node.ID
 		}
 		s.logInfo("telegram.create_device.success", "user_id", userID, "device_id", deviceID, "access_id", out.Access.ID, "node_id", nodeID)
-		accessID = out.Access.ID
+		if out.AccessByProtocol != nil && out.AccessByProtocol["xray"] != nil {
+			accessID = out.AccessByProtocol["xray"].ID
+		} else {
+			accessID = out.Access.ID
+		}
 	} else {
 		actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
 		if err != nil || len(actives) == 0 {

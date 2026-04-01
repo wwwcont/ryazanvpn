@@ -197,10 +197,26 @@ func (r *AmneziaDockerRuntime) RevokePeer(ctx context.Context, req PeerOperation
 
 func (r *AmneziaDockerRuntime) ListPeerStats(ctx context.Context) ([]PeerStat, error) {
 	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.ContainerName, "awg", "show", "all", "dump"}, Timeout: r.commandTimeout()})
-	if err != nil {
-		return nil, fmt.Errorf("list peer stats command failed: %w", err)
-	}
-	if res.ExitCode != 0 {
+	if err != nil || res.ExitCode != 0 {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		stats := make([]PeerStat, 0, len(r.peersByKey))
+		for _, peer := range r.peersByKey {
+			if strings.EqualFold(strings.TrimSpace(peer.Protocol), "xray") {
+				stats = append(stats, PeerStat{
+					Protocol:      "xray",
+					DeviceAccessID: peer.DeviceAccessID,
+					PeerPublicKey: peer.PeerPublicKey,
+					AllowedIP:     peer.AssignedIP,
+				})
+			}
+		}
+		if len(stats) > 0 {
+			return stats, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list peer stats command failed: %w", err)
+		}
 		return nil, fmt.Errorf("list peer stats command failed with exit_code=%d", res.ExitCode)
 	}
 	stats, err := ParseAWGShowAllDump(res.Stdout)

@@ -185,7 +185,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 
 	if uc.CreatePeerExecutor != nil {
 		if err := uc.CreatePeerExecutor.Execute(ctx, op.ID); err != nil {
-			return nil, err
+			slog.Warn("wireguard peer create failed; continue with xray", "device_id", createdDevice.ID, "access_id", createdAccess.ID, "error", err)
 		}
 	}
 	xrayPayload, _ := json.Marshal(map[string]any{
