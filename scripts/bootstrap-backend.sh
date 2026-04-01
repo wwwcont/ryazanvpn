@@ -13,6 +13,6 @@ if [[ ! -f "$TARGET_ENV" ]]; then
 fi
 
 echo "Starting backend stack (postgres, redis, control-plane, caddy)..."
-docker compose --env-file "$TARGET_ENV" -f docker-compose.backend.yml up -d --build
+./scripts/compose-with-env.sh "$TARGET_ENV" -f docker-compose.backend.yml up -d --build
 
 echo "Backend bootstrap completed."

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENV_FILE="${SINGLE_ENV:-.env.single.generated}"
-COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.single.yml)
+COMPOSE=(./scripts/compose-with-env.sh "$ENV_FILE" -f docker-compose.single.yml)
 
 usage() {
   cat <<USAGE
