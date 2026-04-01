@@ -46,3 +46,25 @@ func TestMinLoadNodeAssigner_ReturnsNoActiveNodes(t *testing.T) {
 		t.Fatalf("expected ErrNoActiveNodes, got %v", err)
 	}
 }
+
+func TestMinLoadNodeAssigner_SingleNodeModeAlwaysSelectsConfiguredNode(t *testing.T) {
+	assigner := MinLoadNodeAssigner{SingleNodeID: "n-current"}
+	got, err := assigner.Assign([]*node.Node{
+		{ID: "stale", Status: node.StatusActive, CurrentLoad: 1, UserCapacity: 100},
+		{ID: "n-current", Status: node.StatusActive, CurrentLoad: 99, UserCapacity: 100},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "n-current" {
+		t.Fatalf("expected n-current, got %s", got.ID)
+	}
+}
+
+func TestMinLoadNodeAssigner_SingleNodeModeRejectsMissingNode(t *testing.T) {
+	assigner := MinLoadNodeAssigner{SingleNodeID: "n-current"}
+	_, err := assigner.Assign([]*node.Node{{ID: "stale", Status: node.StatusActive}})
+	if !errors.Is(err, ErrNoActiveNodes) {
+		t.Fatalf("expected ErrNoActiveNodes, got %v", err)
+	}
+}

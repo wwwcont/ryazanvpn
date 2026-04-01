@@ -161,12 +161,12 @@ func (c controlPlaneClient) getDesired(ctx context.Context, nodeID string, nodeT
 type desiredStateResponse struct {
 	NodeStatus string `json:"node_status"`
 	Peers      []struct {
-		AccessID           string         `json:"access_id"`
-		Protocol           string         `json:"protocol"`
-		PeerPublicKey      string         `json:"peer_public_key"`
-		AssignedIP         string         `json:"assigned_ip"`
-		PersistentKeepalive int           `json:"persistent_keepalive"`
-		EndpointParams     map[string]any `json:"endpoint_params"`
+		AccessID            string         `json:"access_id"`
+		Protocol            string         `json:"protocol"`
+		PeerPublicKey       string         `json:"peer_public_key"`
+		AssignedIP          string         `json:"assigned_ip"`
+		PersistentKeepalive int            `json:"persistent_keepalive"`
+		EndpointParams      map[string]any `json:"endpoint_params"`
 	} `json:"peers"`
 }
 
@@ -272,12 +272,12 @@ func containsProtocol(items []string, target string) bool {
 }
 
 func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRuntime, desired []struct {
-	AccessID           string         `json:"access_id"`
-	Protocol           string         `json:"protocol"`
-	PeerPublicKey      string         `json:"peer_public_key"`
-	AssignedIP         string         `json:"assigned_ip"`
-	PersistentKeepalive int           `json:"persistent_keepalive"`
-	EndpointParams     map[string]any `json:"endpoint_params"`
+	AccessID            string         `json:"access_id"`
+	Protocol            string         `json:"protocol"`
+	PeerPublicKey       string         `json:"peer_public_key"`
+	AssignedIP          string         `json:"assigned_ip"`
+	PersistentKeepalive int            `json:"persistent_keepalive"`
+	EndpointParams      map[string]any `json:"endpoint_params"`
 }) []map[string]any {
 	stats, err := rt.ListPeerStats(ctx)
 	if err != nil {
@@ -285,11 +285,11 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 		return []map[string]any{{"error": err.Error()}}
 	}
 	desiredByAccess := make(map[string]struct {
-			Protocol      string
-			PeerPublicKey string
-			AssignedIP    string
-			Keepalive     int
-		}, len(desired))
+		Protocol      string
+		PeerPublicKey string
+		AssignedIP    string
+		Keepalive     int
+	}, len(desired))
 	for _, d := range desired {
 		desiredByAccess[d.AccessID] = struct {
 			Protocol      string
@@ -316,7 +316,7 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 			OperationID:    opID,
 			DeviceAccessID: accessID,
 			Protocol:       d.Protocol,
-				PeerPublicKey:  d.PeerPublicKey,
+			PeerPublicKey:  d.PeerPublicKey,
 			AssignedIP:     d.AssignedIP,
 			Keepalive:      d.Keepalive,
 		})
@@ -330,6 +330,12 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 	}
 	for accessID, cur := range runtimeByAccess {
 		if _, wanted := desiredByAccess[accessID]; wanted {
+			continue
+		}
+		if strings.TrimSpace(accessID) != "" {
+			logger.Warn("peer_consistency.stale_node_reference", slog.String("access_id", accessID), slog.String("runtime_allowed_ip", cur.AllowedIP))
+			logger.Warn("peer_consistency.skip_revoke_stale_node", slog.String("access_id", accessID))
+			results = append(results, map[string]any{"access_id": accessID, "action": "revoke", "status": "skipped", "reason": "stale_node_reference"})
 			continue
 		}
 		protocol := strings.TrimSpace(cur.Protocol)

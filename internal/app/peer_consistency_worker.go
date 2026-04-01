@@ -56,11 +56,11 @@ func (w PeerConsistencyWorker) check(ctx context.Context) {
 			w.logErr("peer consistency: get runtime peers", err)
 			continue
 		}
-		w.compareNodePeers(n.ID, dbPeers, runtimeCounters)
+		w.compareNodePeers(ctx, n.ID, dbPeers, runtimeCounters)
 	}
 }
 
-func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access.DeviceAccess, runtimePeers []NodeTrafficCounter) {
+func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID string, dbPeers []*access.DeviceAccess, runtimePeers []NodeTrafficCounter) {
 	dbByAccessID := make(map[string]*access.DeviceAccess, len(dbPeers))
 	dbByIP := make(map[string]*access.DeviceAccess, len(dbPeers))
 	filtered := make([]*access.DeviceAccess, 0, len(dbPeers))
@@ -83,7 +83,13 @@ func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access
 		id := strings.TrimSpace(rp.DeviceAccessID)
 		if id != "" {
 			if _, ok := dbByAccessID[id]; !ok {
-				w.logWarn("peer consistency mismatch: runtime peer missing in control-plane state", "node_id", nodeID, "access_id", id, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
+				found, err := w.Accesses.GetByID(ctx, id)
+				if err == nil && found != nil && found.VPNNodeID != nodeID {
+					w.logWarn("peer_consistency.stale_node_reference", "node_id", nodeID, "access_id", id, "expected_node_id", found.VPNNodeID, "allowed_ip", rp.AllowedIP)
+					w.logWarn("peer_consistency.skip_revoke_stale_node", "node_id", nodeID, "access_id", id)
+					continue
+				}
+				w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "access_id", id, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
 				continue
 			}
 			seenAccessIDs[id] = struct{}{}
@@ -91,11 +97,11 @@ func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access
 		}
 
 		if strings.TrimSpace(rp.AllowedIP) == "" {
-			w.logWarn("peer consistency mismatch: runtime peer without access_id and allowed_ip", "node_id", nodeID, "public_key", rp.PeerPublicKey)
+			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "public_key", rp.PeerPublicKey)
 			continue
 		}
 		if matched := dbByIP[rp.AllowedIP]; matched == nil {
-			w.logWarn("peer consistency mismatch: runtime peer by ip missing in control-plane state", "node_id", nodeID, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
+			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
 		} else {
 			seenAccessIDs[matched.ID] = struct{}{}
 		}
@@ -105,7 +111,7 @@ func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access
 		if _, ok := seenAccessIDs[p.ID]; ok {
 			continue
 		}
-		w.logWarn("peer consistency mismatch: control-plane active peer absent in runtime", "node_id", nodeID, "access_id", p.ID, "assigned_ip", valuePtrOrDefault(p.AssignedIP, ""))
+		w.logWarn("peer_consistency.runtime_missing", "node_id", nodeID, "access_id", p.ID, "assigned_ip", valuePtrOrDefault(p.AssignedIP, ""))
 	}
 }
 

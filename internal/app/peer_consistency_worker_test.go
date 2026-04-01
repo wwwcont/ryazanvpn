@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +30,12 @@ func TestPeerConsistencyWorker_LogsMismatches(t *testing.T) {
 	if logs.warnCount < 2 {
 		t.Fatalf("expected at least 2 warning logs for mismatches, got %d", logs.warnCount)
 	}
+	if !logs.hasMessage("peer_consistency.control_plane_missing") {
+		t.Fatal("expected peer_consistency.control_plane_missing log")
+	}
+	if !logs.hasMessage("peer_consistency.runtime_missing") {
+		t.Fatal("expected peer_consistency.runtime_missing log")
+	}
 }
 
 func TestPeerConsistencyWorker_IgnoresXrayProtocol(t *testing.T) {
@@ -51,6 +59,28 @@ func TestPeerConsistencyWorker_IgnoresXrayProtocol(t *testing.T) {
 	}
 }
 
+func TestPeerConsistencyWorker_LogsStaleNodeReference(t *testing.T) {
+	repo := &pcNodeRepo{nodes: []*node.Node{{ID: "n1", AgentBaseURL: "http://n1"}}}
+	accessRepo := &pcAccessRepo{
+		byNode: map[string][]*access.DeviceAccess{"n1": {}},
+		byID:   map[string]*access.DeviceAccess{"a-other": {ID: "a-other", VPNNodeID: "n-stale", Protocol: "wireguard"}},
+	}
+	logs := &pcLogCollector{}
+	worker := PeerConsistencyWorker{
+		Logger:        slog.New(logs),
+		Nodes:         repo,
+		Accesses:      accessRepo,
+		ClientFactory: &pcFactory{items: []NodeTrafficCounter{{DeviceAccessID: "a-other", Protocol: "wireguard", AllowedIP: "10.0.0.3/32"}}},
+	}
+	worker.check(context.Background())
+	if !logs.hasMessage("peer_consistency.stale_node_reference") {
+		t.Fatal("expected stale node reference log")
+	}
+	if !logs.hasMessage("peer_consistency.skip_revoke_stale_node") {
+		t.Fatal("expected skip revoke stale node log")
+	}
+}
+
 type pcNodeRepo struct{ nodes []*node.Node }
 
 func (r *pcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }
@@ -62,13 +92,17 @@ func (r *pcNodeRepo) UpdateLoad(ctx context.Context, id string, currentLoad int)
 
 type pcAccessRepo struct {
 	byNode map[string][]*access.DeviceAccess
+	byID   map[string]*access.DeviceAccess
 }
 
 func (r *pcAccessRepo) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
 	return nil, nil
 }
 func (r *pcAccessRepo) GetByID(ctx context.Context, id string) (*access.DeviceAccess, error) {
-	return nil, nil
+	if item, ok := r.byID[id]; ok {
+		return item, nil
+	}
+	return nil, errors.New("not found")
 }
 func (r *pcAccessRepo) Activate(ctx context.Context, id string, grantedAt time.Time) error {
 	return nil
@@ -106,6 +140,7 @@ func (c pcTrafficClient) GetTrafficCounters(ctx context.Context) ([]NodeTrafficC
 type pcLogCollector struct {
 	mu        sync.Mutex
 	warnCount int
+	messages  []string
 }
 
 func (h *pcLogCollector) Enabled(ctx context.Context, level slog.Level) bool { return true }
@@ -114,10 +149,21 @@ func (h *pcLogCollector) Handle(ctx context.Context, rec slog.Record) error {
 	defer h.mu.Unlock()
 	if rec.Level >= slog.LevelWarn {
 		h.warnCount++
+		h.messages = append(h.messages, rec.Message)
 	}
 	return nil
 }
 func (h *pcLogCollector) WithAttrs(attrs []slog.Attr) slog.Handler { return h }
 func (h *pcLogCollector) WithGroup(name string) slog.Handler       { return h }
+func (h *pcLogCollector) hasMessage(part string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, msg := range h.messages {
+		if strings.Contains(msg, part) {
+			return true
+		}
+	}
+	return false
+}
 
 func strPtrPC(v string) *string { return &v }
