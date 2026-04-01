@@ -136,29 +136,74 @@ extract_interface_private_key() {
 
 write_server_public_key() {
   conf="$1"
+  log_mode="${2:-ready}"
   private_key="$(extract_interface_private_key "$conf")"
   if [ -z "$private_key" ]; then
-    echo "amnezia.server_public_key.error reason=private_key_not_found config=$conf" >&2
+    echo "amnezia.server_public_key.warning reason=private_key_not_found config=$conf" >&2
     return 1
   fi
 
   if ! public_key="$(printf '%s\n' "$private_key" | awg pubkey 2>/dev/null)"; then
-    echo "amnezia.server_public_key.error reason=pubkey_calculation_failed config=$conf" >&2
+    echo "amnezia.server_public_key.warning reason=pubkey_calculation_failed config=$conf" >&2
     return 1
   fi
 
   public_key="$(printf '%s' "$public_key" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   if [ -z "$public_key" ]; then
-    echo "amnezia.server_public_key.error reason=empty_pubkey config=$conf" >&2
+    echo "amnezia.server_public_key.warning reason=empty_pubkey config=$conf" >&2
     return 1
   fi
 
   public_key_dir="$(dirname "$PUBLIC_KEY_PATH")"
-  mkdir -p "$public_key_dir"
+  if ! mkdir -p "$public_key_dir" 2>/dev/null; then
+    echo "amnezia.server_public_key.warning reason=directory_create_failed path=$PUBLIC_KEY_PATH" >&2
+    return 1
+  fi
   umask 077
-  printf '%s\n' "$public_key" > "$PUBLIC_KEY_PATH"
+  if ! printf '%s\n' "$public_key" > "$PUBLIC_KEY_PATH"; then
+    echo "amnezia.server_public_key.warning reason=file_write_failed path=$PUBLIC_KEY_PATH" >&2
+    return 1
+  fi
+  case "$log_mode" in
+    reused)
+      echo "amnezia.server_public_key.reused path=$PUBLIC_KEY_PATH" >&2
+      ;;
+    *)
+      echo "amnezia.server_public_key.ready path=$PUBLIC_KEY_PATH" >&2
+      ;;
+  esac
+}
 
-  echo "amnezia.server_public_key.ready path=$PUBLIC_KEY_PATH value=$public_key" >&2
+read_public_key_file() {
+  if [ ! -f "$PUBLIC_KEY_PATH" ]; then
+    return 1
+  fi
+  key="$(tr -d '\r\n' < "$PUBLIC_KEY_PATH" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [ -z "$key" ]; then
+    return 1
+  fi
+  echo "$key"
+}
+
+ensure_server_public_key() {
+  conf="$1"
+  mode="$2"
+
+  if read_public_key_file >/dev/null 2>&1; then
+    echo "amnezia.server_public_key.reused path=$PUBLIC_KEY_PATH" >&2
+    return 0
+  fi
+
+  if [ "$mode" = "generated" ]; then
+    if ! write_server_public_key "$conf" ready; then
+      echo "amnezia.server_public_key.warning reason=initial_write_failed path=$PUBLIC_KEY_PATH config=$conf" >&2
+    fi
+    return 0
+  fi
+
+  if ! write_server_public_key "$conf" reused; then
+    echo "amnezia.server_public_key.warning reason=recover_failed path=$PUBLIC_KEY_PATH config=$conf" >&2
+  fi
 }
 
 extract_addresses() {
@@ -277,14 +322,16 @@ shutdown() {
 }
 
 main() {
+  config_mode="existing"
   conf="$(find_config || true)"
   if [ -z "$conf" ]; then
     echo "amnezia.server_config.not_found iface=$IFACE conf_dir=$CONF_DIR action=generating_from_env" >&2
     conf="$(create_config_from_env)"
+    config_mode="generated"
   fi
   ensure_listen_port "$conf"
   echo "amnezia.server_config.selected path=$conf" >&2
-  write_server_public_key "$conf"
+  ensure_server_public_key "$conf" "$config_mode"
 
   start_runtime
   apply_config "$conf"
