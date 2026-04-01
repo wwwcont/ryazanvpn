@@ -68,6 +68,9 @@ func TestAmneziaDockerRuntime_ApplyPeerBuildsCommand(t *testing.T) {
 	if !strings.Contains(joined, "exec amnezia-awg2 awg set awg0 peer pub1") || !strings.Contains(joined, "allowed-ips 10.0.0.5/32") {
 		t.Fatalf("unexpected apply args: %v", last.Args)
 	}
+	if strings.Contains(joined, "persistent-keepalive") {
+		t.Fatalf("server-side apply must not include persistent-keepalive: %v", last.Args)
+	}
 }
 
 func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
