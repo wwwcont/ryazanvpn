@@ -20,6 +20,10 @@ Config lookup order at startup:
 4. `/etc/amnezia/wg0.conf`
 5. `/etc/amnezia/server.conf`
 
+If no config file is found, the entrypoint now creates a minimal bootstrap config at
+`/etc/amnezia/${AMNEZIA_INTERFACE_NAME}.conf` with a generated `PrivateKey` and
+`ListenPort` (`AMNEZIA_LISTEN_PORT`, default `51820`), then brings the interface up.
+
 ## Compatibility mode
 `/usr/local/bin/awg` proxies to `wg` and strips Amnezia-only non-standard keys from `setconf`.
 This preserves node-agent contract (`awg show`, `awg set`, `awg show all dump`) while using kernel-backed networking.

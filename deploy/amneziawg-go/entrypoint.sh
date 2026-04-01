@@ -25,6 +25,24 @@ find_config() {
   done
 }
 
+create_default_config() {
+  default_conf="$CONF_DIR/$IFACE.conf"
+  if [ -f "$default_conf" ]; then
+    echo "$default_conf"
+    return
+  fi
+
+  mkdir -p "$CONF_DIR"
+  private_key="$(wg genkey)"
+  umask 077
+  cat > "$default_conf" <<EOF
+[Interface]
+PrivateKey = $private_key
+ListenPort = ${AMNEZIA_LISTEN_PORT:-51820}
+EOF
+  echo "$default_conf"
+}
+
 extract_addresses() {
   conf="$1"
   awk '
@@ -90,7 +108,9 @@ main() {
   if [ -n "$conf" ]; then
     apply_config "$conf"
   else
-    echo "kernel-backed awg runtime: config not found in $CONF_DIR" >&2
+    echo "kernel-backed awg runtime: config not found in $CONF_DIR; generating minimal bootstrap config" >&2
+    conf="$(create_default_config)"
+    apply_config "$conf"
   fi
 
   trap 'shutdown; exit 0' INT TERM

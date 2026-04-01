@@ -124,6 +124,9 @@ type TelegramService struct {
 	NodeCapacity    int
 	ConfigEncryptor app.EncryptionService
 	VPNExporter     app.VPNKeyExporter
+	Finance         interface {
+		AddManualAdjustment(ctx context.Context, userID string, amountKopecks int64, reference string) error
+	}
 	DefaultVPNMTU   int
 	DefaultVPNAWG   app.DefaultVPNAWGFields
 }
@@ -685,8 +688,23 @@ func (s *TelegramService) adminBalanceAdjust(ctx context.Context, chatID int64, 
 		_ = s.Bot.SendMessage(ctx, chatID, "Пользователь не найден.", nil)
 		return
 	}
-	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Запрос на корректировку баланса принят: user=%d @%s amount=%s.\nПримените операцию через API /users/{id}/ledger.", u.TelegramID, u.Username, parts[1]), nil)
-	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.requested", map[string]any{"target_user_id": u.ID, "amount_raw": parts[1]})
+	amount, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || amount == 0 {
+		_ = s.Bot.SendMessage(ctx, chatID, "Некорректная сумма. Пример: @username +100 или @username -50", nil)
+		return
+	}
+	if s.Finance == nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Сервис баланса недоступен.", nil)
+		return
+	}
+	reference := fmt.Sprintf("tg_admin:%s", actorUserID)
+	if err := s.Finance.AddManualAdjustment(ctx, u.ID, amount, reference); err != nil {
+		s.logErr("admin balance adjust", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось применить корректировку баланса.", nil)
+		return
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Баланс обновлён: user=%d @%s amount=%+d.", u.TelegramID, u.Username, amount), nil)
+	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.applied", map[string]any{"target_user_id": u.ID, "amount_kopecks": amount})
 }
 
 func (s *TelegramService) createSingleCode(ctx context.Context, chatID int64, actorUserID string) {
