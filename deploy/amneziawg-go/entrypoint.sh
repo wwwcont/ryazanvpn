@@ -68,6 +68,47 @@ create_config_from_env() {
   echo "$conf"
 }
 
+ensure_listen_port() {
+  conf="$1"
+  [ -n "$EXPECTED_PORT" ] || return 0
+  tmp="${conf}.tmp.$$"
+  awk -v expected="$EXPECTED_PORT" '
+    BEGIN { in_interface = 0; inserted = 0 }
+    /^[[:space:]]*\[Interface\][[:space:]]*$/ {
+      if (in_interface && inserted == 0) {
+        print "ListenPort = " expected
+        inserted = 1
+      }
+      in_interface = 1
+      print
+      next
+    }
+    /^[[:space:]]*\[/ {
+      if (in_interface && inserted == 0) {
+        print "ListenPort = " expected
+        inserted = 1
+      }
+      in_interface = 0
+      print
+      next
+    }
+    {
+      if (in_interface && $0 ~ /^[[:space:]]*ListenPort[[:space:]]*=/) {
+        print "ListenPort = " expected
+        inserted = 1
+        next
+      }
+      print
+    }
+    END {
+      if (in_interface && inserted == 0) {
+        print "ListenPort = " expected
+      }
+    }
+  ' "$conf" > "$tmp"
+  mv "$tmp" "$conf"
+}
+
 extract_addresses() {
   conf="$1"
   awk '
@@ -145,13 +186,18 @@ main() {
     echo "amnezia.server_config.not_found iface=$IFACE conf_dir=$CONF_DIR action=generating_from_env" >&2
     conf="$(create_config_from_env)"
   fi
-  echo "amnezia.server_config.loaded path=$conf" >&2
+  ensure_listen_port "$conf"
+  echo "amnezia.server_config.selected path=$conf" >&2
 
   start_runtime
   apply_config "$conf"
   actual_port="$(awg show "$IFACE" listen-port 2>/dev/null || true)"
   echo "amnezia.server_listen_port.expected value=${EXPECTED_PORT:-unknown}" >&2
   echo "amnezia.server_listen_port.actual value=${actual_port:-unknown}" >&2
+  if [ -n "$EXPECTED_PORT" ] && [ "$actual_port" != "$EXPECTED_PORT" ]; then
+    echo "amnezia.server_listen_port.mismatch expected=$EXPECTED_PORT actual=${actual_port:-unknown}" >&2
+    exit 1
+  fi
 
   trap 'shutdown; exit 0' INT TERM
   wait "$RUNTIME_PID"

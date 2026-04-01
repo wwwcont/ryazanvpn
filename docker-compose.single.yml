@@ -92,7 +92,7 @@ services:
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
     volumes:
-      - ./deploy/node/xray/config.json:/etc/xray/config.json:ro
+      - ./deploy/node/xray:/etc/xray:rw
       - single_xray_data:/var/lib/xray
       - single_xray_logs:/var/log/xray
     healthcheck:

@@ -478,13 +478,16 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		return err
 	}
 	defer os.Remove(tmpPath)
+	r.log("xray.config.write.start", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer), slog.String("path", configPath))
 	if res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"cp", tmpPath, r.cfg.XrayContainer + ":" + configPath}, Timeout: r.commandTimeout()}); err != nil || res.ExitCode != 0 {
 		if err == nil {
 			err = fmt.Errorf("docker cp xray config failed with exit_code=%d", res.ExitCode)
 		}
+		r.log("xray.config.write.error", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer), slog.String("path", configPath), slog.String("error", err.Error()))
 		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
 	}
+	r.log("xray.config.write.success", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer), slog.String("path", configPath))
 	r.log("xray.config.reload.start", slog.String("container", r.cfg.XrayContainer))
 	if res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"restart", r.cfg.XrayContainer}, Timeout: r.commandTimeout()}); err != nil || res.ExitCode != 0 {
 		if err == nil {
