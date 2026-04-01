@@ -1340,6 +1340,9 @@ func (s *TelegramService) resolveActiveAccessIDByProtocol(ctx context.Context, u
 			continue
 		}
 		if len(item.ConfigBlobEncrypted) == 0 {
+			if strings.EqualFold(strings.TrimSpace(protocol), "xray") {
+				return item.ID, nil
+			}
 			s.logInfo("telegram.config_blob.empty", "user_id", userID, "access_id", item.ID, "protocol", protocol, "action", "skip_broken_access")
 			continue
 		}

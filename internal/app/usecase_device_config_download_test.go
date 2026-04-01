@@ -276,7 +276,7 @@ func (amneziaFieldRenderer) RenderXrayReality(in RenderXrayRealityInput) (string
 	return "{\"protocol\":\"xray\"}", nil
 }
 
-func TestIssueDeviceConfig_FallbackStripsAmneziaCustomParams(t *testing.T) {
+func TestIssueDeviceConfig_KeepsAmneziaCustomParams(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
 	encrypt := fakeEncryptor{}
@@ -308,8 +308,8 @@ func TestIssueDeviceConfig_FallbackStripsAmneziaCustomParams(t *testing.T) {
 		t.Fatalf("decrypt config failed: %v", err)
 	}
 	config := string(plain)
-	if strings.Contains(config, "Jc =") || strings.Contains(config, "H1 =") || strings.Contains(config, "I1 =") {
-		t.Fatalf("expected custom amnezia params to be stripped, got config: %s", config)
+	if !strings.Contains(config, "Jc = 4") || !strings.Contains(config, "H1 = custom") || !strings.Contains(config, "I1 = payload") {
+		t.Fatalf("expected custom amnezia params to be preserved, got config: %s", config)
 	}
 }
 
