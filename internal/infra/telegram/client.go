@@ -27,6 +27,7 @@ type HTTPBotClient struct {
 }
 
 func (c *HTTPBotClient) SendMessage(ctx context.Context, chatID int64, text string, markup *InlineKeyboardMarkup) error {
+	startedAt := time.Now()
 	slog.Info("telegram.send_message.start", "chat_id", chatID)
 	payload := map[string]any{
 		"chat_id": chatID,
@@ -36,10 +37,10 @@ func (c *HTTPBotClient) SendMessage(ctx context.Context, chatID int64, text stri
 		payload["reply_markup"] = markup
 	}
 	if err := c.call(ctx, "sendMessage", payload); err != nil {
-		slog.Error("telegram.send_message.error", "chat_id", chatID, "error", err)
+		slog.Error("telegram.send_message.error", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)
 		return err
 	}
-	slog.Info("telegram.send_message.success", "chat_id", chatID)
+	slog.Info("telegram.send_message.success", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 	return nil
 }
 

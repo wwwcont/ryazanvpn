@@ -40,12 +40,14 @@ func (s FinanceService) addLedgerEntry(ctx context.Context, userID string, op st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var current int64
-	if err := tx.QueryRow(ctx, `SELECT balance_kopecks FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current); err != nil {
-		return err
-	}
-	next := current + amountKopecks
-	if _, err := tx.Exec(ctx, `UPDATE users SET balance_kopecks = $2, updated_at = NOW(), status = CASE WHEN $2 > 0 THEN 'active' ELSE status END WHERE id = $1`, userID, next); err != nil {
+	var next int64
+	if err := tx.QueryRow(ctx, `
+UPDATE users
+SET balance_kopecks = balance_kopecks + $2,
+	updated_at = NOW(),
+	status = CASE WHEN balance_kopecks + $2 > 0 THEN 'active' ELSE status END
+WHERE id = $1
+RETURNING balance_kopecks`, userID, amountKopecks).Scan(&next); err != nil {
 		return err
 	}
 	rawMeta, _ := json.Marshal(metadata)

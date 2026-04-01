@@ -25,8 +25,10 @@ const accessGrantDuration = 30 * 24 * time.Hour
 var inviteCodeRegex = regexp.MustCompile(`^\d{4}$`)
 
 type ActivateInviteCodeInput struct {
-	UserID string
-	Code   string
+	UserID         string
+	Code           string
+	TelegramUserID int64
+	TelegramChatID int64
 }
 
 type ActivateInviteCodeRepos interface {
@@ -47,9 +49,16 @@ type ActivateInviteCode struct {
 }
 
 func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeInput) error {
-	slog.Info("activate_invite_code.start", "user_id", in.UserID, "invite_code", in.Code)
+	startedAt := time.Now()
+	baseFields := []any{
+		"telegram_user_id", in.TelegramUserID,
+		"chat_id", in.TelegramChatID,
+		"user_id", in.UserID,
+		"invite_code", in.Code,
+	}
+	slog.Info("activate_invite_code.start", append(baseFields, "duration_ms", int64(0))...)
 	if !inviteCodeRegex.MatchString(in.Code) {
-		slog.Error("activate_invite_code.error", "user_id", in.UserID, "invite_code", in.Code, "error", ErrInvalidInviteCodeFormat)
+		slog.Error("activate_invite_code.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", ErrInvalidInviteCodeFormat)...)
 		return ErrInvalidInviteCodeFormat
 	}
 
@@ -59,6 +68,7 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 	}
 
 	err := uc.Store.WithinTx(ctx, func(repos ActivateInviteCodeRepos) error {
+		slog.Info("activate_invite_code.lookup_invite.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 		u, err := repos.Users().GetByID(ctx, in.UserID)
 		if err != nil {
 			if errors.Is(err, user.ErrNotFound) {
@@ -69,14 +79,20 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 
 		ic, err := repos.InviteCodes().GetByCodeForUpdate(ctx, in.Code)
 		if err != nil {
+			slog.Error("activate_invite_code.lookup_invite.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
 			return err
 		}
+		slog.Info("activate_invite_code.lookup_invite.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 
+		slog.Info("activate_invite_code.lock_user.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 		if activeGrant, err := repos.AccessGrants().GetActiveByUserID(ctx, u.ID); err == nil && activeGrant != nil {
+			slog.Error("activate_invite_code.lock_user.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", ErrUserAlreadyHasActiveAccessGrant)...)
 			return ErrUserAlreadyHasActiveAccessGrant
 		} else if err != nil && !errors.Is(err, accessgrant.ErrNotFound) {
+			slog.Error("activate_invite_code.lock_user.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
 			return err
 		}
+		slog.Info("activate_invite_code.lock_user.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 
 		if ic.Status != invitecode.CodeStatusActive {
 			return ErrInviteCodeNotUsable
@@ -100,6 +116,7 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 			return err
 		}
 
+		slog.Info("activate_invite_code.create_grant.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 		accessGrant, err := repos.AccessGrants().Create(ctx, accessgrant.CreateParams{
 			UserID:       u.ID,
 			InviteCodeID: ic.ID,
@@ -109,6 +126,7 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 			DevicesLimit: 1,
 		})
 		if err != nil {
+			slog.Error("activate_invite_code.create_grant.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
 			return err
 		}
 		if uc.Finance != nil {
@@ -142,13 +160,17 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		if err != nil {
 			return fmt.Errorf("create audit log: %w", err)
 		}
-		slog.Info("activate_invite_code.success", "user_id", in.UserID, "invite_code", in.Code, "grant_id", accessGrant.ID)
+		slog.Info("activate_invite_code.create_grant.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "grant_id", accessGrant.ID)...)
+		slog.Info("activate_invite_code.commit.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 
 		return nil
 	})
 	if err != nil {
-		slog.Error("activate_invite_code.error", "user_id", in.UserID, "invite_code", in.Code, "error", err)
+		slog.Error("activate_invite_code.commit.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
+		slog.Error("activate_invite_code.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
 		return err
 	}
+	slog.Info("activate_invite_code.commit.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
+	slog.Info("activate_invite_code.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 	return nil
 }
