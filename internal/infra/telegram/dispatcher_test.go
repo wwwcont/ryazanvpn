@@ -60,7 +60,7 @@ func TestEnterCodePutsIntoAwaitState(t *testing.T) {
 func TestInviteCodeActivatesAndSendsDocument(t *testing.T) {
 	bot := &fakeBot{}
 	state := &MemoryStateStore{}
-	accRepo := &fakeAccesses{byID: &access.DeviceAccess{ID: "a1", DeviceID: "d1", ConfigBlobEncrypted: []byte("x")}}
+	accRepo := &fakeAccesses{byID: &access.DeviceAccess{ID: "a1", DeviceID: "d1", Protocol: "wireguard", ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n"), VPNNodeID: "n1"}}
 	svc := &TelegramService{
 		Bot:              bot,
 		States:           state,
@@ -68,9 +68,10 @@ func TestInviteCodeActivatesAndSendsDocument(t *testing.T) {
 		ActivateInviteUC: fakeActivate{},
 		GetGrantUC: &fakeGetGrant{grant: &accessgrant.AccessGrant{ID: "g1", UserID: "u1", Status: accessgrant.StatusActive,
 			ExpiresAt: time.Now().Add(24 * time.Hour)}},
-		CreateDeviceUC:  fakeCreateDevice{out: &app.CreateDeviceForUserOutput{Access: &access.DeviceAccess{ID: "a1"}}},
-		Devices:         &fakeDevices{activeErr: device.ErrNotFound},
+		CreateDeviceUC:  fakeCreateDevice{out: &app.CreateDeviceForUserOutput{Device: &device.Device{ID: "d1", PublicKey: "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE="}, Access: &access.DeviceAccess{ID: "a1"}}},
+		Devices:         &fakeDevices{active: &device.Device{ID: "d1", PublicKey: "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE="}},
 		Accesses:        accRepo,
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
 		AccessGrants:    &fakeAccessGrantRepo{latest: nil},
 		DownloadBaseURL: "https://vpn.example.com",
 		TokenTTL:        10 * time.Minute,
@@ -130,6 +131,74 @@ func TestSendHealthLink_WhenXrayConfigEmpty_ShowsConfigNotReady(t *testing.T) {
 	}
 	if !strings.Contains(bot.messages[len(bot.messages)-1].text, "Health-конфиг ещё не готов") {
 		t.Fatalf("expected config-not-ready message, got %+v", bot.messages[len(bot.messages)-1])
+	}
+}
+
+func TestHandleGetConfig_DefaultProtocolXray(t *testing.T) {
+	bot := &fakeBot{}
+	svc := &TelegramService{
+		Bot: bot,
+		GetGrantUC: &fakeGetGrant{grant: &accessgrant.AccessGrant{
+			ID: "g1", UserID: "u1", Status: accessgrant.StatusActive, ExpiresAt: time.Now().Add(24 * time.Hour),
+		}},
+		Devices: &fakeDevices{active: &device.Device{ID: "d1"}},
+		Accesses: &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{
+			"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`)},
+			"aw": {ID: "aw", DeviceID: "d1", Protocol: "wireguard", VPNNodeID: "n1", ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n")},
+		}},
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
+		ConfigEncryptor: fakeEncryptor{},
+		XrayExporter:    &fakeXrayExporter{link: "vless://u@h:1?security=reality#x"},
+		XrayPublicHost:  "x.example.com",
+		XrayRealityPort: 8443,
+		XrayServerName:  "www.cloudflare.com",
+		XrayShortID:     "0123456789abcdef",
+		XrayPublicKey:   "pub",
+	}
+
+	svc.handleGetConfig(context.Background(), 100, "u1")
+
+	if len(bot.messages) < 2 {
+		t.Fatalf("expected xray + speed prompt messages, got %+v", bot.messages)
+	}
+	if !strings.Contains(bot.messages[0].text, "vless://") {
+		t.Fatalf("expected first message to be xray link, got %q", bot.messages[0].text)
+	}
+	if !strings.Contains(bot.messages[1].text, "Speed") {
+		t.Fatalf("expected second message to offer speed config, got %q", bot.messages[1].text)
+	}
+}
+
+func TestHandleGetConfig_FallbacksToWireguardWhenXrayUnavailable(t *testing.T) {
+	bot := &fakeBot{}
+	svc := &TelegramService{
+		Bot: bot,
+		GetGrantUC: &fakeGetGrant{grant: &accessgrant.AccessGrant{
+			ID: "g1", UserID: "u1", Status: accessgrant.StatusActive, ExpiresAt: time.Now().Add(24 * time.Hour),
+		}},
+		Devices: &fakeDevices{active: &device.Device{
+			ID: "d1", PublicKey: "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		}},
+		Accesses: &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{
+			"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray"},
+			"aw": {ID: "aw", DeviceID: "d1", Protocol: "wireguard", VPNNodeID: "n1", ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n")},
+		}},
+		ConfigEncryptor: fakeEncryptor{},
+		XrayExporter:    &fakeXrayExporter{link: "vless://u@h:1?security=reality#x"},
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
+	}
+
+	svc.handleGetConfig(context.Background(), 100, "u1")
+
+	foundDoc := false
+	for _, m := range bot.messages {
+		if strings.Contains(m.text, "AmneziaWG/WireGuard") {
+			foundDoc = true
+			break
+		}
+	}
+	if !foundDoc {
+		t.Fatalf("expected wireguard document fallback, got %+v", bot.messages)
 	}
 }
 
