@@ -9,6 +9,8 @@ SOCK_DIR="/var/run/amneziawg"
 SOCK_PATH="${SOCK_DIR}/${IFACE}.sock"
 EXPECTED_PORT="${AMNEZIA_PORT:-${AMNEZIA_LISTEN_PORT:-}}"
 DEFAULT_SUBNET="${AMNEZIA_SUBNET:-10.8.1.0/24}"
+NAT_ENABLED="${AMNEZIA_NAT_ENABLED:-1}"
+EGRESS_IFACE="${AMNEZIA_EGRESS_IFACE:-}"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -168,6 +170,50 @@ apply_config() {
   ip link set up dev "$IFACE"
 }
 
+detect_egress_iface() {
+  if [ -n "$EGRESS_IFACE" ]; then
+    echo "$EGRESS_IFACE"
+    return
+  fi
+  iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+  if [ -n "$iface" ]; then
+    echo "$iface"
+    return
+  fi
+  echo "eth0"
+}
+
+ensure_rule() {
+  table="$1"
+  shift
+  if [ "$table" = "nat" ]; then
+    if iptables -t nat -C "$@" 2>/dev/null; then
+      return 0
+    fi
+    iptables -t nat -A "$@"
+    return 0
+  fi
+
+  if iptables -C "$@" 2>/dev/null; then
+    return 0
+  fi
+  iptables -A "$@"
+}
+
+setup_forwarding() {
+  if [ "$NAT_ENABLED" != "1" ]; then
+    echo "amnezia.forwarding.disabled nat_enabled=$NAT_ENABLED" >&2
+    return 0
+  fi
+
+  egress="$(detect_egress_iface)"
+  sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+  ensure_rule nat POSTROUTING -s "$DEFAULT_SUBNET" -o "$egress" -j MASQUERADE
+  ensure_rule filter FORWARD -i "$IFACE" -o "$egress" -j ACCEPT
+  ensure_rule filter FORWARD -i "$egress" -o "$IFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
+  echo "amnezia.forwarding.ready iface=$IFACE subnet=$DEFAULT_SUBNET egress=$egress" >&2
+}
+
 shutdown() {
   if [ "${RUNTIME_PID:-}" != "" ]; then
     kill "$RUNTIME_PID" 2>/dev/null || true
@@ -191,6 +237,7 @@ main() {
 
   start_runtime
   apply_config "$conf"
+  setup_forwarding
   actual_port="$(awg show "$IFACE" listen-port 2>/dev/null || true)"
   echo "amnezia.server_listen_port.expected value=${EXPECTED_PORT:-unknown}" >&2
   echo "amnezia.server_listen_port.actual value=${actual_port:-unknown}" >&2
