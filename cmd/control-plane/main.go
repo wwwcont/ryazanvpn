@@ -161,6 +161,12 @@ func main() {
 				AdminIDs:        adminIDs,
 				ConfigEncryptor: encryptor,
 				VPNExporter:     vpnkey.NewDefaultVPNExporter(),
+				XrayExporter:    vpnkey.NewXrayRealityExporter(),
+				XrayPublicHost:  cfg.XrayPublicHost,
+				XrayRealityPort: cfg.XrayRealityPort,
+				XrayServerName:  cfg.XrayRealityServerName,
+				XrayShortID:     cfg.XrayRealityShortID,
+				XrayPublicKey:   cfg.XrayRealityPublicKey,
 				Finance:         financeSvc,
 				DefaultVPNMTU:   cfg.VPNAWGMTU,
 				DefaultVPNAWG: app.DefaultVPNAWGFields{

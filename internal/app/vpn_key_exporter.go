@@ -41,3 +41,19 @@ type ExportVPNKeyInput struct {
 type VPNKeyExporter interface {
 	ExportDefaultVPN(ctx context.Context, in ExportVPNKeyInput) (string, error)
 }
+
+type ExportXrayRealityInput struct {
+	UUID             string
+	ServerHost       string
+	Port             int
+	RealityPublicKey string
+	ServerName       string
+	ShortID          string
+	Fingerprint      string
+	Flow             string
+	Label            string
+}
+
+type XrayRealityKeyExporter interface {
+	ExportVLESSReality(ctx context.Context, in ExportXrayRealityInput) (string, error)
+}

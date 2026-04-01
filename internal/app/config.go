@@ -44,6 +44,11 @@ type Config struct {
 	AmneziaContainerName    string
 	AmneziaInterfaceName    string
 	XrayContainerName       string
+	XrayPublicHost          string
+	XrayRealityPort         int
+	XrayRealityServerName   string
+	XrayRealityShortID      string
+	XrayRealityPublicKey    string
 	DockerBinaryPath        string
 	VPNSubnetCIDR           string
 	VPNServerPublicEndpoint string
@@ -121,6 +126,11 @@ func LoadConfig(serviceName string) (Config, error) {
 		AmneziaContainerName:    envOrDefault("AMNEZIA_CONTAINER_NAME", "amnezia-awg2"),
 		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", "awg0"),
 		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", "ryazanvpn-xray"),
+		XrayPublicHost:          envOrDefault("XRAY_PUBLIC_HOST", ""),
+		XrayRealityPort:         intFromEnv("XRAY_REALITY_PORT", 8443),
+		XrayRealityServerName:   envOrDefault("XRAY_REALITY_SERVER_NAME", "www.cloudflare.com"),
+		XrayRealityShortID:      envOrDefault("XRAY_REALITY_SHORT_ID", "0123456789abcdef"),
+		XrayRealityPublicKey:    envOrDefault("XRAY_REALITY_PUBLIC_KEY", ""),
 		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "/usr/bin/docker"),
 		VPNSubnetCIDR:           envOrDefault("VPN_SUBNET_CIDR", "10.8.1.0/24"),
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
