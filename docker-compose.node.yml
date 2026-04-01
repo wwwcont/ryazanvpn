@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: deploy/amneziawg-go/Dockerfile
+    env_file: [.env.node.generated]
     container_name: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
     restart: unless-stopped
     cap_add:
