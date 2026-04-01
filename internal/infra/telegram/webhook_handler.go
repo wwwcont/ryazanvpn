@@ -1,10 +1,14 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
+
+const webhookUpdateTimeout = 55 * time.Second
 
 type WebhookHandler struct {
 	SecretToken string
@@ -32,6 +36,10 @@ func (h WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	h.Service.HandleUpdate(r.Context(), upd)
 	w.WriteHeader(http.StatusOK)
+	go func(update Update) {
+		ctx, cancel := context.WithTimeout(context.Background(), webhookUpdateTimeout)
+		defer cancel()
+		h.Service.HandleUpdate(ctx, update)
+	}(upd)
 }

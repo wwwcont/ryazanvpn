@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -1117,11 +1118,20 @@ func (s *TelegramService) logAudit(ctx context.Context, actorUserID, action stri
 		return nil
 	}
 	actor := actorUserID
-	detail := "{}"
-	if len(details) > 0 {
-		detail = fmt.Sprintf("%v", details)
+	payload := details
+	if payload == nil {
+		payload = map[string]any{}
 	}
-	_, err := s.AuditLogs.Create(ctx, audit.CreateParams{ActorUserID: &actor, EntityType: "telegram_admin", Action: action, DetailsJSON: detail})
+	detailBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.AuditLogs.Create(ctx, audit.CreateParams{
+		ActorUserID: &actor,
+		EntityType:  "telegram_admin",
+		Action:      action,
+		DetailsJSON: string(detailBytes),
+	})
 	return err
 }
 
