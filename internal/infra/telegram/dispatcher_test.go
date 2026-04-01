@@ -113,6 +113,26 @@ func TestSendHealthLink_UsesXrayExporter(t *testing.T) {
 	}
 }
 
+func TestSendHealthLink_WhenXrayConfigEmpty_ShowsConfigNotReady(t *testing.T) {
+	bot := &fakeBot{}
+	svc := &TelegramService{
+		Bot:             bot,
+		Devices:         &fakeDevices{active: &device.Device{ID: "d1"}},
+		Accesses:        &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray"}}},
+		ConfigEncryptor: fakeEncryptor{},
+		XrayExporter:    &fakeXrayExporter{link: "vless://u@h:1?security=reality#x"},
+	}
+
+	svc.sendHealthLink(context.Background(), 1, "u1")
+
+	if len(bot.messages) == 0 {
+		t.Fatal("expected bot message")
+	}
+	if !strings.Contains(bot.messages[len(bot.messages)-1].text, "Health-конфиг ещё не готов") {
+		t.Fatalf("expected config-not-ready message, got %+v", bot.messages[len(bot.messages)-1])
+	}
+}
+
 type fakeBot struct{ messages []sentMessage }
 
 type sentMessage struct {

@@ -130,18 +130,6 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		return nil, err
 	}
 	if protocol == "wireguard" {
-		if shouldFallbackAmneziaParams(in.AWG) {
-			slog.Info("amnezia.runtime.params.expected",
-				"access_id", in.DeviceAccessID,
-				"jc", in.AWG.Jc, "jmin", in.AWG.Jmin, "jmax", in.AWG.Jmax,
-				"s1", in.AWG.S1, "s2", in.AWG.S2, "s3", in.AWG.S3, "s4", in.AWG.S4,
-				"h1", in.AWG.H1, "h2", in.AWG.H2, "h3", in.AWG.H3, "h4", in.AWG.H4,
-				"i1", in.AWG.I1, "i2", in.AWG.I2, "i3", in.AWG.I3, "i4", in.AWG.I4, "i5", in.AWG.I5,
-			)
-			slog.Info("amnezia.runtime.params.actual", "access_id", in.DeviceAccessID, "mode", "fallback_without_custom_params")
-			slog.Warn("amnezia.runtime.params.mismatch", "access_id", in.DeviceAccessID, "reason", "custom_params_not_verified_on_runtime", "action", "render_without_custom_params")
-			cfg = stripAmneziaCustomParams(cfg)
-		}
 		parsedCfg, parseErr := parseWireguardConfig(cfg)
 		if parseErr != nil {
 			slog.Error("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "error", parseErr)
@@ -216,55 +204,6 @@ type parsedWireguardConfig struct {
 	ClientPublicKey  string
 	ServerPublicKey  string
 	PresharedKey     string
-}
-
-var amneziaCustomParamKeys = map[string]struct{}{
-	"jc":   {},
-	"jmin": {},
-	"jmax": {},
-	"s1":   {},
-	"s2":   {},
-	"s3":   {},
-	"s4":   {},
-	"h1":   {},
-	"h2":   {},
-	"h3":   {},
-	"h4":   {},
-	"i1":   {},
-	"i2":   {},
-	"i3":   {},
-	"i4":   {},
-	"i5":   {},
-}
-
-func shouldFallbackAmneziaParams(awg DefaultVPNAWGFields) bool {
-	return awg.Jc != 0 || awg.Jmin != 0 || awg.Jmax != 0 ||
-		awg.S1 != 0 || awg.S2 != 0 || awg.S3 != 0 || awg.S4 != 0 ||
-		strings.TrimSpace(awg.H1) != "" || strings.TrimSpace(awg.H2) != "" || strings.TrimSpace(awg.H3) != "" || strings.TrimSpace(awg.H4) != "" ||
-		strings.TrimSpace(awg.I1) != "" || strings.TrimSpace(awg.I2) != "" || strings.TrimSpace(awg.I3) != "" || strings.TrimSpace(awg.I4) != "" || strings.TrimSpace(awg.I5) != ""
-}
-
-func stripAmneziaCustomParams(config string) string {
-	out := make([]string, 0, len(strings.Split(config, "\n")))
-	inInterface := false
-	for _, raw := range strings.Split(config, "\n") {
-		line := strings.TrimSpace(raw)
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			inInterface = strings.EqualFold(line, "[Interface]")
-			out = append(out, raw)
-			continue
-		}
-		if inInterface {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				if _, ok := amneziaCustomParamKeys[strings.ToLower(strings.TrimSpace(parts[0]))]; ok {
-					continue
-				}
-			}
-		}
-		out = append(out, raw)
-	}
-	return strings.Join(out, "\n")
 }
 
 func parseWireguardConfig(config string) (parsedWireguardConfig, error) {
