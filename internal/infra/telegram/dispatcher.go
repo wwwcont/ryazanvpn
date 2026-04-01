@@ -625,6 +625,7 @@ func (s *TelegramService) sendAccessStatus(ctx context.Context, chatID int64, us
 
 func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, userID string) {
 	s.logInfo("telegram.config_flow.start", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", "", "protocol", "")
+	s.logInfo("telegram.config_flow.default_protocol", "chat_id", chatID, "user_id", userID, "protocol", "xray")
 	grant, err := s.GetGrantUC.Execute(ctx, app.GetActiveAccessGrantByUserInput{UserID: userID})
 	if err != nil {
 		if errors.Is(err, accessgrant.ErrNotFound) {
@@ -648,8 +649,6 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		return
 	}
 
-	var accessID string
-	var selectedDeviceID string
 	if d == nil {
 		s.logInfo("telegram.create_device.start", "user_id", userID, "chat_id", chatID)
 		out, err := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
@@ -668,12 +667,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		}
 		s.logInfo("telegram.create_device.success", "user_id", userID, "device_id", deviceID, "access_id", out.Access.ID, "node_id", nodeID)
 		if out.Device != nil {
-			selectedDeviceID = out.Device.ID
-		}
-		if out.AccessByProtocol != nil && out.AccessByProtocol["wireguard"] != nil {
-			accessID = out.AccessByProtocol["wireguard"].ID
-		} else if out.Access != nil {
-			accessID = out.Access.ID
+			d = out.Device
 		}
 	} else {
 		actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
@@ -681,36 +675,17 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 			s.sendErrorReplyMessage(chatID, "Нет активного доступа устройства. Удалите устройство и создайте заново.", nil, "user_id", userID)
 			return
 		}
-		selectedDeviceID = d.ID
-		for _, item := range actives {
-			if item == nil || !strings.EqualFold(strings.TrimSpace(item.Protocol), "wireguard") {
-				continue
-			}
-			if len(item.ConfigBlobEncrypted) == 0 {
-				s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", "wireguard", "action", "skip_broken_access")
-				continue
-			}
-			fresh, checkErr := s.isWireguardConfigBlobCurrent(ctx, item)
-			if checkErr != nil {
-				s.logErr("wireguard config freshness check failed", checkErr)
-				continue
-			}
-			if !fresh {
-				s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", "wireguard", "action", "stale_server_public_key")
-				continue
-			}
-			accessID = item.ID
-			break
-		}
-		if accessID == "" {
+		if _, err := s.resolveActiveAccessIDByProtocol(ctx, userID, "wireguard"); err != nil {
 			s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", "", "protocol", "wireguard", "action", "recreate_device")
 			s.logInfo("telegram.config_regenerate.start", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "protocol", "wireguard")
-			for _, item := range actives {
-				if item == nil {
-					continue
+				for _, item := range actives {
+					if item == nil {
+						continue
+					}
+					if s.RevokeAccessUC != nil {
+						_ = s.RevokeAccessUC.Execute(ctx, app.RevokeDeviceAccessInput{AccessID: item.ID})
+					}
 				}
-				_ = s.RevokeAccessUC.Execute(ctx, app.RevokeDeviceAccessInput{AccessID: item.ID})
-			}
 			_ = s.Devices.Revoke(ctx, d.ID)
 			out, createErr := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
 			if createErr != nil {
@@ -720,25 +695,25 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 				return
 			}
 			if out.Device != nil {
-				selectedDeviceID = out.Device.ID
+				d = out.Device
 			}
-			if out.AccessByProtocol != nil && out.AccessByProtocol["wireguard"] != nil {
-				accessID = out.AccessByProtocol["wireguard"].ID
-			} else if out.Access != nil {
-				accessID = out.Access.ID
-			}
-			s.logInfo("telegram.config_regenerate.success", "chat_id", chatID, "user_id", userID, "device_id", selectedDeviceID, "access_id", accessID, "protocol", "wireguard")
-		}
-		if accessID == "" {
-			s.sendErrorReplyMessage(chatID, "Нет активного Speed-доступа (wireguard).", nil, "user_id", userID)
-			return
+			s.logInfo("telegram.config_regenerate.success", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "protocol", "wireguard")
 		}
 	}
-	s.logInfo("telegram.protocol_access.selected", "protocol", "wireguard", "access_id", accessID, "device_id", selectedDeviceID, "user_id", userID, "chat_id", chatID)
-	s.logInfo("telegram.config_flow.protocol_selected", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", accessID, "protocol", "wireguard")
-	s.logInfo("telegram.config_flow.success", "chat_id", chatID, "user_id", userID, "grant_id", grant.ID, "access_id", accessID)
-
-	s.sendConfigDocumentByAccessID(ctx, chatID, userID, accessID)
+	xrayDelivered := s.trySendHealthLink(ctx, chatID, userID)
+	if !xrayDelivered {
+		s.logInfo("telegram.config_flow.partial_failure", "chat_id", chatID, "user_id", userID, "protocol", "xray")
+		dw, acc, wErr := s.resolveProtocolAccess(ctx, userID, "wireguard")
+		if wErr != nil {
+			s.sendErrorReplyMessage(chatID, "Не удалось подготовить ни Health, ни Speed конфиг. Попробуйте позже.", nil, "user_id", userID)
+			return
+		}
+		s.logInfo("telegram.protocol_access.selected", "protocol", "wireguard", "access_id", acc.ID, "device_id", dw.ID, "user_id", userID, "chat_id", chatID)
+		s.sendConfigDocumentByAccessID(ctx, chatID, userID, acc.ID)
+		return
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, "Health готов ✅\nЕсли нужен Speed (Amnezia/WireGuard), нажмите кнопку ниже.", speedMenu())
+	s.logInfo("telegram.config_flow.success", "chat_id", chatID, "user_id", userID, "grant_id", grant.ID, "protocol", "xray")
 }
 
 func (s *TelegramService) askDeleteConfirm(ctx context.Context, chatID, telegramID int64) {
@@ -792,20 +767,24 @@ func (s *TelegramService) sendCodesHistoryInfo(ctx context.Context, chatID int64
 }
 
 func (s *TelegramService) sendHealthLink(ctx context.Context, chatID int64, userID string) {
+	_ = s.trySendHealthLink(ctx, chatID, userID)
+}
+
+func (s *TelegramService) trySendHealthLink(ctx context.Context, chatID int64, userID string) bool {
 	if s.XrayExporter == nil {
 		_ = s.Bot.SendMessage(ctx, chatID, "Экспорт Health-ссылки пока недоступен.", healthMenu())
-		return
+		return false
 	}
 	accessID, err := s.resolveActiveAccessIDByProtocol(ctx, userID, "xray")
 	if err != nil {
-		_ = s.Bot.SendMessage(ctx, chatID, "Health пока недоступен: сначала активируйте код или пополните баланс.", healthMenu())
-		return
+		_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг пока недоступен. Вы можете использовать Speed.", healthMenu())
+		return false
 	}
 	d, err := s.Devices.GetActiveByUserID(ctx, userID)
 	if err != nil {
 		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", accessID, "protocol", "xray")
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось получить данные устройства.", healthMenu())
-		return
+		return false
 	}
 	s.logInfo("telegram.protocol_access.selected", "protocol", "xray", "access_id", accessID, "device_id", d.ID, "user_id", userID, "chat_id", chatID)
 	s.logInfo("telegram.config_flow.protocol_selected", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
@@ -813,13 +792,13 @@ func (s *TelegramService) sendHealthLink(ctx context.Context, chatID int64, user
 	if err != nil {
 		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
 		_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг ещё не готов. Попробуйте позже.", healthMenu())
-		return
+		return false
 	}
 	uuid, err := parseXrayUUID(configPlain)
 	if err != nil {
 		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось извлечь параметры Health-конфига.", healthMenu())
-		return
+		return false
 	}
 	link, err := s.XrayExporter.ExportVLESSReality(ctx, app.ExportXrayRealityInput{
 		UUID:             uuid,
@@ -833,11 +812,12 @@ func (s *TelegramService) sendHealthLink(ctx context.Context, chatID int64, user
 	if err != nil {
 		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось сформировать Health-ссылку.", healthMenu())
-		return
+		return false
 	}
 	_ = s.Bot.SendMessage(ctx, chatID, "Ключ/ссылка Health (Xray Reality):\n```\n"+link+"\n```", healthMenu())
 	s.logInfo("telegram.delivery.vless_link", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
 	s.logInfo("telegram.config_flow.export_xray.success", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
+	return true
 }
 
 func (s *TelegramService) sendHealthHowTo(ctx context.Context, chatID int64) {
@@ -1425,6 +1405,7 @@ func (s *TelegramService) validateWireguardConfigServerKey(ctx context.Context, 
 	if err != nil {
 		return false, err
 	}
+	s.logInfo("wg.config.render.runtime_server_public_key", "access_id", acc.ID, "server_public_key", currentKey)
 	s.logInfo("wg.config.render.server_public_key", "access_id", acc.ID, "server_public_key", currentKey)
 	runtimePeerKey, err := s.currentDevicePublicKey(ctx, acc)
 	if err != nil {
@@ -1435,6 +1416,8 @@ func (s *TelegramService) validateWireguardConfigServerKey(ctx context.Context, 
 		currentKey = parsedCfg.ServerPublicKey
 	}
 	if !strings.EqualFold(strings.TrimSpace(parsedCfg.ServerPublicKey), strings.TrimSpace(currentKey)) {
+		s.logInfo("wg.config.render.source", "access_id", acc.ID, "value", "encrypted_blob")
+		s.logInfo("wg.config.render.stale_blob_detected", "access_id", acc.ID, "value", true)
 		s.logErr("VPN_SERVER_PUBLIC_KEY mismatch in rendered config", fmt.Errorf("access_id=%s rendered=%q current=%q", acc.ID, parsedCfg.ServerPublicKey, currentKey))
 		if s.Accesses != nil {
 			_ = s.Accesses.ClearConfigBlobEncrypted(ctx, acc.ID)
@@ -1442,12 +1425,16 @@ func (s *TelegramService) validateWireguardConfigServerKey(ctx context.Context, 
 		return false, nil
 	}
 	if runtimePeerKey != "" && !strings.EqualFold(strings.TrimSpace(parsedCfg.ClientPublicKey), strings.TrimSpace(runtimePeerKey)) {
+		s.logInfo("wg.config.render.source", "access_id", acc.ID, "value", "encrypted_blob")
+		s.logInfo("wg.config.render.stale_blob_detected", "access_id", acc.ID, "value", true)
 		s.logErr("wireguard runtime peer public key mismatch", fmt.Errorf("access_id=%s rendered=%q current=%q", acc.ID, parsedCfg.ClientPublicKey, runtimePeerKey))
 		if s.Accesses != nil {
 			_ = s.Accesses.ClearConfigBlobEncrypted(ctx, acc.ID)
 		}
 		return false, nil
 	}
+	s.logInfo("wg.config.render.source", "access_id", acc.ID, "value", "encrypted_blob")
+	s.logInfo("wg.config.render.stale_blob_detected", "access_id", acc.ID, "value", false)
 	s.logInfo("wg.config.render.blob_regenerated", "access_id", acc.ID, "value", false)
 	return true, nil
 }

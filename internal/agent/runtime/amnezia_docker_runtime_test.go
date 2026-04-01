@@ -221,3 +221,45 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayValidationFailsBeforeWrite(t *testing
 		t.Fatalf("expected only read call before failure, got %d", len(exec.calls))
 	}
 }
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
+	workDir := t.TempDir()
+	config := `{"inbounds":[{"tag":"vless-reality","listen":"0.0.0.0","port":8443,"settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"www.cloudflare.com:443"}}}],"outbounds":[{"protocol":"freedom"}]}`
+	var stagedConfig string
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: config},
+			{ExitCode: 0},
+			{ExitCode: 0},
+		},
+		onRun: func(req shell.ExecRequest) {
+			if len(req.Args) >= 3 && req.Args[0] == "cp" {
+				raw, err := os.ReadFile(req.Args[1])
+				if err == nil {
+					stagedConfig = string(raw)
+				}
+			}
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		XrayContainer:    "ryazanvpn-xray",
+		XrayConfigPath:   "/etc/xray/config.json",
+		WorkDir:          workDir,
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-tag",
+		DeviceAccessID: "da-tag",
+		Protocol:       "xray",
+		PeerPublicKey:  "11111111-1111-1111-1111-111111111111",
+		AssignedIP:     "10.0.0.9/32",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stagedConfig, `"id": "11111111-1111-1111-1111-111111111111"`) {
+		t.Fatalf("expected xray client id to be added by tag match, got: %s", stagedConfig)
+	}
+}

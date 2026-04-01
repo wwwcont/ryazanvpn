@@ -452,7 +452,8 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		if !ok {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") {
+		tag := strings.TrimSpace(asString(inbound["tag"]))
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") && !strings.EqualFold(tag, "vless-reality") {
 			continue
 		}
 		settings, ok := inbound["settings"].(map[string]any)
@@ -549,7 +550,8 @@ func validateXrayConfig(cfg map[string]any) error {
 		if !ok {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") {
+		tag := strings.TrimSpace(asString(inbound["tag"]))
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") && !strings.EqualFold(tag, "vless-reality") {
 			continue
 		}
 		if _, ok := inbound["port"]; !ok {
