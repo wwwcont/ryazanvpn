@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func TestIssueAndDownloadDeviceConfig(t *testing.T) {
 		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
 		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
 		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
 		AssignedIP:       "10.0.0.2/32",
 		EndpointHost:     "example.com",
 		EndpointPort:     51820,
@@ -118,7 +120,7 @@ func (r *cfgTokenRepo) RevokeIssuedByAccessID(ctx context.Context, deviceAccessI
 type fakeRenderer struct{}
 
 func (fakeRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
-	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey, nil
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\nPresharedKey = " + in.PresharedKey + "\n", nil
 }
 func (fakeRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
 	return "{\"protocol\":\"xray\"}", nil
@@ -131,7 +133,7 @@ type trackingRenderer struct {
 
 func (r *trackingRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
 	r.amneziaCalls++
-	return "wg", nil
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\nPresharedKey = " + in.PresharedKey + "\n", nil
 }
 
 func (r *trackingRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
@@ -188,6 +190,126 @@ func TestIssueDeviceConfig_WireguardDoesNotUseXrayRenderer(t *testing.T) {
 	}
 	if renderer.amneziaCalls != 1 {
 		t.Fatalf("wg renderer calls=%d, want 1", renderer.amneziaCalls)
+	}
+}
+
+func TestIssueDeviceConfig_RejectsRenderedServerPublicKeyMismatch(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	issue := IssueDeviceConfig{
+		Accesses:  accessRepo,
+		Tokens:    &cfgTokenRepo{},
+		Renderer:  mismatchServerKeyRenderer{},
+		Encryptor: fakeEncryptor{},
+		Now:       func() time.Time { return now },
+	}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "expectedSrv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+	})
+	if err == nil {
+		t.Fatal("expected rendered server key mismatch error")
+	}
+}
+
+type mismatchServerKeyRenderer struct{}
+
+func (mismatchServerKeyRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = wrongSrv\nPresharedKey = " + in.PresharedKey + "\n", nil
+}
+
+func (mismatchServerKeyRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	return "{\"protocol\":\"xray\"}", nil
+}
+
+type mismatchPresharedKeyRenderer struct{}
+
+func (mismatchPresharedKeyRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\nPresharedKey = wrongPsk\n", nil
+}
+
+func (mismatchPresharedKeyRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	return "{\"protocol\":\"xray\"}", nil
+}
+
+func TestIssueDeviceConfig_RejectsRenderedPresharedKeyMismatch(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	issue := IssueDeviceConfig{
+		Accesses:  accessRepo,
+		Tokens:    &cfgTokenRepo{},
+		Renderer:  mismatchPresharedKeyRenderer{},
+		Encryptor: fakeEncryptor{},
+		Now:       func() time.Time { return now },
+	}
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+	})
+	if err == nil {
+		t.Fatal("expected rendered preshared key mismatch error")
+	}
+}
+
+type amneziaFieldRenderer struct{}
+
+func (amneziaFieldRenderer) RenderAmneziaWG(in RenderAmneziaWGInput) (string, error) {
+	return "[Interface]\nPrivateKey = " + in.DevicePrivateKey + "\nJc = 4\nH1 = custom\nI1 = payload\n[Peer]\nPublicKey = " + in.ServerPublicKey + "\nPresharedKey = " + in.PresharedKey + "\n", nil
+}
+
+func (amneziaFieldRenderer) RenderXrayReality(in RenderXrayRealityInput) (string, error) {
+	return "{\"protocol\":\"xray\"}", nil
+}
+
+func TestIssueDeviceConfig_FallbackStripsAmneziaCustomParams(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	encrypt := fakeEncryptor{}
+	issue := IssueDeviceConfig{
+		Accesses:  accessRepo,
+		Tokens:    &cfgTokenRepo{},
+		Renderer:  amneziaFieldRenderer{},
+		Encryptor: encrypt,
+		Now:       func() time.Time { return now },
+	}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "example.com",
+		EndpointPort:     51820,
+		AWG:              DefaultVPNAWGFields{Jc: 4, H1: "custom", I1: "payload"},
+	})
+	if err != nil {
+		t.Fatalf("issue wireguard config failed: %v", err)
+	}
+	plain, err := encrypt.Decrypt(accessRepo.entry.ConfigBlobEncrypted)
+	if err != nil {
+		t.Fatalf("decrypt config failed: %v", err)
+	}
+	config := string(plain)
+	if strings.Contains(config, "Jc =") || strings.Contains(config, "H1 =") || strings.Contains(config, "I1 =") {
+		t.Fatalf("expected custom amnezia params to be stripped, got config: %s", config)
 	}
 }
 

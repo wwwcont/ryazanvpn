@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,10 +13,14 @@ import (
 type amneziaFakeExecutor struct {
 	calls []shell.ExecRequest
 	res   []shell.ExecResult
+	onRun func(shell.ExecRequest)
 }
 
 func (f *amneziaFakeExecutor) Run(ctx context.Context, req shell.ExecRequest) (shell.ExecResult, error) {
 	f.calls = append(f.calls, req)
+	if f.onRun != nil {
+		f.onRun(req)
+	}
 	if len(f.res) == 0 {
 		return shell.ExecResult{ExitCode: 0}, nil
 	}
@@ -94,11 +99,21 @@ func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 
 func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	workDir := t.TempDir()
+	config := `{"inbounds":[{"port":443,"listen":"0.0.0.0","protocol":"vless","settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443","serverNames":["google.com"],"privateKey":"test","shortIds":["0123456789abcdef"]}}}]}`
+	var stagedConfig string
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
-			{ExitCode: 0, Stdout: `{"inbounds":[{"protocol":"vless","settings":{"clients":[]}}]}`},
+			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
+		},
+		onRun: func(req shell.ExecRequest) {
+			if len(req.Args) >= 3 && req.Args[0] == "cp" {
+				raw, err := os.ReadFile(req.Args[1])
+				if err == nil {
+					stagedConfig = string(raw)
+				}
+			}
 		},
 	}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
@@ -133,5 +148,76 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	cpArgs := exec.calls[1].Args
 	if len(cpArgs) < 3 || cpArgs[0] != "cp" || cpArgs[2] != "ryazanvpn-xray:/etc/xray/config.json" {
 		t.Fatalf("unexpected cp args: %v", cpArgs)
+	}
+	if stagedConfig == "" {
+		t.Fatal("expected staged config content to be captured")
+	}
+	text := stagedConfig
+	if !strings.Contains(text, `"port": 443`) {
+		t.Fatalf("expected inbound port to be preserved, got: %s", text)
+	}
+	if !strings.Contains(text, `"realitySettings"`) {
+		t.Fatalf("expected reality settings to be preserved, got: %s", text)
+	}
+	if !strings.Contains(text, `"id": "11111111-1111-1111-1111-111111111111"`) {
+		t.Fatalf("expected xray client id to be added, got: %s", text)
+	}
+}
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayRejectsInvalidUUIDBeforeWrite(t *testing.T) {
+	exec := &amneziaFakeExecutor{}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		XrayContainer:    "ryazanvpn-xray",
+		XrayConfigPath:   "/etc/xray/config.json",
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-x",
+		DeviceAccessID: "da-x",
+		Protocol:       "xray",
+		PeerPublicKey:  "fbsQWD4wqojnTsOQiR6b4A7eL9Ci/rRVg3xszJePHyI=",
+		AssignedIP:     "10.0.0.5",
+	})
+	if err == nil {
+		t.Fatal("expected invalid UUID error")
+	}
+	if !strings.Contains(err.Error(), "canonical UUID") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exec.calls) != 0 {
+		t.Fatalf("expected no docker calls for invalid UUID, got %d", len(exec.calls))
+	}
+}
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayValidationFailsBeforeWrite(t *testing.T) {
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: `{"inbounds":[{"protocol":"vless","settings":{"clients":[]},"streamSettings":{"security":"reality"}}]}`},
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		XrayContainer:    "ryazanvpn-xray",
+		XrayConfigPath:   "/etc/xray/config.json",
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-x",
+		DeviceAccessID: "da-x",
+		Protocol:       "xray",
+		PeerPublicKey:  "11111111-1111-1111-8111-111111111111",
+		AssignedIP:     "10.0.0.5",
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), ".port is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("expected only read call before failure, got %d", len(exec.calls))
 	}
 }
