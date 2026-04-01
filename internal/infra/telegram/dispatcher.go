@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -123,6 +124,9 @@ type TelegramService struct {
 	NodeCapacity    int
 	ConfigEncryptor app.EncryptionService
 	VPNExporter     app.VPNKeyExporter
+	Finance         interface {
+		AddManualAdjustment(ctx context.Context, userID string, amountKopecks int64, reference string) error
+	}
 	DefaultVPNMTU   int
 	DefaultVPNAWG   app.DefaultVPNAWGFields
 }
@@ -592,7 +596,11 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 			nodeID = out.Node.ID
 		}
 		s.logInfo("telegram.create_device.success", "user_id", userID, "device_id", deviceID, "access_id", out.Access.ID, "node_id", nodeID)
-		accessID = out.Access.ID
+		if out.AccessByProtocol != nil && out.AccessByProtocol["xray"] != nil {
+			accessID = out.AccessByProtocol["xray"].ID
+		} else {
+			accessID = out.Access.ID
+		}
 	} else {
 		actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
 		if err != nil || len(actives) == 0 {
@@ -684,8 +692,23 @@ func (s *TelegramService) adminBalanceAdjust(ctx context.Context, chatID int64, 
 		_ = s.Bot.SendMessage(ctx, chatID, "Пользователь не найден.", nil)
 		return
 	}
-	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Запрос на корректировку баланса принят: user=%d @%s amount=%s.\nПримените операцию через API /users/{id}/ledger.", u.TelegramID, u.Username, parts[1]), nil)
-	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.requested", map[string]any{"target_user_id": u.ID, "amount_raw": parts[1]})
+	amount, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || amount == 0 {
+		_ = s.Bot.SendMessage(ctx, chatID, "Некорректная сумма. Пример: @username +100 или @username -50", nil)
+		return
+	}
+	if s.Finance == nil {
+		_ = s.Bot.SendMessage(ctx, chatID, "Сервис баланса недоступен.", nil)
+		return
+	}
+	reference := fmt.Sprintf("tg_admin:%s", actorUserID)
+	if err := s.Finance.AddManualAdjustment(ctx, u.ID, amount, reference); err != nil {
+		s.logErr("admin balance adjust", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось применить корректировку баланса.", nil)
+		return
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Баланс обновлён: user=%d @%s amount=%+d.", u.TelegramID, u.Username, amount), nil)
+	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.applied", map[string]any{"target_user_id": u.ID, "amount_kopecks": amount})
 }
 
 func (s *TelegramService) createSingleCode(ctx context.Context, chatID int64, actorUserID string) {
@@ -1117,11 +1140,20 @@ func (s *TelegramService) logAudit(ctx context.Context, actorUserID, action stri
 		return nil
 	}
 	actor := actorUserID
-	detail := "{}"
-	if len(details) > 0 {
-		detail = fmt.Sprintf("%v", details)
+	payload := details
+	if payload == nil {
+		payload = map[string]any{}
 	}
-	_, err := s.AuditLogs.Create(ctx, audit.CreateParams{ActorUserID: &actor, EntityType: "telegram_admin", Action: action, DetailsJSON: detail})
+	detailBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.AuditLogs.Create(ctx, audit.CreateParams{
+		ActorUserID: &actor,
+		EntityType:  "telegram_admin",
+		Action:      action,
+		DetailsJSON: string(detailBytes),
+	})
 	return err
 }
 

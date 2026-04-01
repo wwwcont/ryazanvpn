@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wwwcont/ryazanvpn/internal/app"
 	"github.com/wwwcont/ryazanvpn/internal/infra/cache"
 	configrenderer "github.com/wwwcont/ryazanvpn/internal/infra/configrenderer"
@@ -55,6 +58,7 @@ func main() {
 	opRepo := pgrepo.NewNodeOperationRepository(pg)
 	trafficRepo := pgrepo.NewTrafficRepository(pg)
 	financeSvc := &app.FinanceService{PG: pg}
+	ensureSingleNode(ctx, logger, pg, cfg)
 
 	nodeClientCfg := nodeclient.Config{
 		BaseURL:    cfg.NodeAgentBaseURL,
@@ -154,6 +158,7 @@ func main() {
 				AdminIDs:        adminIDs,
 				ConfigEncryptor: encryptor,
 				VPNExporter:     vpnkey.NewDefaultVPNExporter(),
+				Finance:         financeSvc,
 				DefaultVPNMTU:   cfg.VPNAWGMTU,
 				DefaultVPNAWG: app.DefaultVPNAWGFields{
 					Jc:   cfg.VPNAWGJc,
@@ -270,4 +275,53 @@ func main() {
 	}
 
 	logger.Info("service stopped")
+}
+
+func ensureSingleNode(ctx context.Context, logger *slog.Logger, pg *pgxpool.Pool, cfg app.Config) {
+	if cfg.NodeID == "" {
+		return
+	}
+	nodeName := cfg.NodeName
+	if nodeName == "" {
+		nodeName = "single-node"
+	}
+	region := cfg.NodeRegion
+	if region == "" {
+		region = "single-server"
+	}
+	publicIP := cfg.NodePublicIP
+	if publicIP == "" {
+		publicIP = "127.0.0.1"
+	}
+	agentBaseURL := cfg.NodeAgentBaseURL
+	if agentBaseURL == "" {
+		agentBaseURL = "http://node-agent:8081"
+	}
+	capacity := cfg.NodeCapacity
+	if capacity <= 0 {
+		capacity = 40
+	}
+	meta, _ := json.Marshal(map[string]any{"protocols_supported": cfg.NodeProtocolsSupported, "bootstrapped_by": "control-plane"})
+	_, err := pg.Exec(ctx, `
+INSERT INTO vpn_nodes (
+	id, name, region, status, user_capacity, agent_base_url, vpn_endpoint,
+	vpn_endpoint_host, vpn_endpoint_port, server_public_key, vpn_subnet_cidr,
+	runtime_metadata, last_seen_at, created_at, updated_at
+) VALUES (
+	$1, $2, $3, 'active', $4, $5, $6 || ':41475', $6, 41475,
+	'', '10.8.1.0/24', $7::jsonb, NOW(), NOW(), NOW()
+)
+ON CONFLICT (id) DO UPDATE SET
+	name=COALESCE(NULLIF(EXCLUDED.name,''), vpn_nodes.name),
+	region=COALESCE(NULLIF(EXCLUDED.region,''), vpn_nodes.region),
+	user_capacity=CASE WHEN EXCLUDED.user_capacity > 0 THEN EXCLUDED.user_capacity ELSE vpn_nodes.user_capacity END,
+	agent_base_url=COALESCE(NULLIF(EXCLUDED.agent_base_url,''), vpn_nodes.agent_base_url),
+	runtime_metadata=EXCLUDED.runtime_metadata,
+	status='active',
+	updated_at=NOW()`, cfg.NodeID, nodeName, region, capacity, agentBaseURL, publicIP, string(meta))
+	if err != nil {
+		logger.Error("ensure single node bootstrap failed", slog.Any("error", err), slog.String("node_id", cfg.NodeID))
+		return
+	}
+	logger.Info("single node ensured", slog.String("node_id", cfg.NodeID), slog.String("node_name", nodeName), slog.String("region", region), slog.String("endpoint", fmt.Sprintf("%s:41475", publicIP)))
 }

@@ -181,9 +181,15 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 		"protocols":      cfg.NodeProtocolsSupported,
 		"capacity":       cfg.NodeCapacity,
 	}
-	if err := cp.post(ctx, "/nodes/register", registerPayload); err != nil {
-		logger.Error("node register failed", slog.Any("error", err))
+	registered := false
+	register := func() {
+		if err := cp.post(ctx, "/nodes/register", registerPayload); err != nil {
+			logger.Error("node register failed", slog.Any("error", err))
+			return
+		}
+		registered = true
 	}
+	register()
 
 	interval := cfg.NodeHeartbeatInterval
 	if interval < 30*time.Second || interval > 60*time.Second {
@@ -193,6 +199,9 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 	defer ticker.Stop()
 
 	reconcile := func() {
+		if !registered {
+			register()
+		}
 		healthStatus := "active"
 		availableProtocols := make([]string, 0, len(cfg.NodeProtocolsSupported))
 		healthCtx, cancel := context.WithTimeout(ctx, cfg.RuntimeExecTimeout)
@@ -217,6 +226,7 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 		desired, err := cp.getDesired(ctx, cfg.NodeID, cfg.NodeToken)
 		if err != nil {
 			logger.Error("desired state fetch failed", slog.Any("error", err))
+			registered = false
 			return
 		}
 		results := reconcileRuntime(ctx, logger, rt, desired.Peers)
@@ -365,7 +375,7 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
 		defer cancel()
 		if err := rt.Health(healthCtx); err != nil {
-			return nil, err
+			logger.Warn("runtime health check failed on startup; continuing in degraded mode", slog.Any("error", err))
 		}
 		return rt, nil
 	}
@@ -404,7 +414,7 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
 		defer cancel()
 		if err := rt.Health(healthCtx); err != nil {
-			return nil, err
+			logger.Warn("runtime health check failed on startup; continuing in degraded mode", slog.Any("error", err))
 		}
 		return rt, nil
 	}
