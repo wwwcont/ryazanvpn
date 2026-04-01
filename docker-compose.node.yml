@@ -36,7 +36,7 @@ services:
     environment:
       - TZ=${TZ:-UTC}
     volumes:
-      - ./deploy/node/xray/config.json:/etc/xray/config.json:ro
+      - ./deploy/node/xray:/etc/xray:rw
       - node_xray_data:/var/lib/xray
       - node_xray_logs:/var/log/xray
     healthcheck:

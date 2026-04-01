@@ -178,7 +178,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
-	xrayUserUUID := hashToken(createdXrayAccess.ID)[:32]
+	xrayUserUUID := deterministicUUIDFromSeed(createdXrayAccess.ID)
 
 	payload, _ := json.Marshal(map[string]any{
 		"device_id":     createdDevice.ID,
@@ -224,7 +224,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	}
 	if uc.CreatePeerExecutor != nil {
 		if err := uc.CreatePeerExecutor.Execute(ctx, xrayOp.ID); err != nil {
-			return nil, err
+			slog.Warn("xray peer create failed; continue with wireguard", "device_id", createdDevice.ID, "access_id", createdXrayAccess.ID, "error", err)
 		}
 	}
 
@@ -466,4 +466,19 @@ func splitEndpointHostPort(vpnEndpoint string) (string, int) {
 
 func encodeBase64(v []byte) string {
 	return base64.StdEncoding.EncodeToString(v)
+}
+
+func deterministicUUIDFromSeed(seed string) string {
+	hash := hashToken(seed)
+	if len(hash) < 32 {
+		hash = hash + strings.Repeat("0", 32-len(hash))
+	}
+	base := []byte(strings.ToLower(hash[:32]))
+	base[12] = '4'
+	switch base[16] {
+	case '8', '9', 'a', 'b':
+	default:
+		base[16] = '8'
+	}
+	return fmt.Sprintf("%s-%s-%s-%s-%s", string(base[0:8]), string(base[8:12]), string(base[12:16]), string(base[16:20]), string(base[20:32]))
 }
