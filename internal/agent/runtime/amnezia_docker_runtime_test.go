@@ -91,3 +91,47 @@ func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
+	workDir := t.TempDir()
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: `{"inbounds":[{"protocol":"vless","settings":{"clients":[]}}]}`},
+			{ExitCode: 0},
+			{ExitCode: 0},
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		ContainerName:    "amnezia-awg2",
+		InterfaceName:    "awg0",
+		XrayContainer:    "ryazanvpn-xray",
+		XrayConfigPath:   "/etc/xray/config.json",
+		WorkDir:          workDir,
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-x",
+		DeviceAccessID: "da-x",
+		Protocol:       "xray",
+		PeerPublicKey:  "11111111-1111-1111-1111-111111111111",
+		AssignedIP:     "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exec.calls) != 3 {
+		t.Fatalf("expected 3 docker calls, got %d", len(exec.calls))
+	}
+	if got := strings.Join(exec.calls[0].Args, " "); !strings.Contains(got, "exec ryazanvpn-xray cat /etc/xray/config.json") {
+		t.Fatalf("unexpected read args: %v", exec.calls[0].Args)
+	}
+	if got := strings.Join(exec.calls[2].Args, " "); !strings.Contains(got, "restart ryazanvpn-xray") {
+		t.Fatalf("unexpected restart args: %v", exec.calls[2].Args)
+	}
+	cpArgs := exec.calls[1].Args
+	if len(cpArgs) < 3 || cpArgs[0] != "cp" || cpArgs[2] != "ryazanvpn-xray:/etc/xray/config.json" {
+		t.Fatalf("unexpected cp args: %v", cpArgs)
+	}
+}

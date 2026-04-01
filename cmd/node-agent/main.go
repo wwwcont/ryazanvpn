@@ -415,6 +415,9 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 			DockerBinaryPath: resolved,
 			ContainerName:    cfg.AmneziaContainerName,
 			InterfaceName:    cfg.AmneziaInterfaceName,
+			ExpectedPort:     cfg.AmneziaPort,
+			XrayContainer:    cfg.XrayContainerName,
+			XrayConfigPath:   cfg.XrayConfigPath,
 			CommandTimeout:   cfg.RuntimeExecTimeout,
 		}, shell.NewOSExecutor(logger))
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
