@@ -11,85 +11,87 @@ import (
 
 // Config stores process configuration loaded from environment variables.
 type Config struct {
-	ServiceName             string
-	HTTPAddr                string
-	ShutdownTimeout         time.Duration
-	LogLevel                string
-	PostgresURL             string
-	RedisAddr               string
-	RedisPassword           string
-	RedisDB                 int
-	ReadinessTimeout        time.Duration
-	LivenessTimeout         time.Duration
-	AgentHMACSecret         string
-	AgentHMACMaxSkew        time.Duration
-	NodeAgentBaseURL        string
-	NodeAgentSecret         string
-	NodeAgentTimeout        time.Duration
-	NodeAgentRetries        int
-	ConfigMasterKey         string
-	AdminSecret             string
-	AdminSecretHeader       string
-	NodeHealthPollInterval  time.Duration
-	NodeHealthCheckTimeout  time.Duration
-	PeerConsistencyInterval time.Duration
-	RuntimeAdapter          string
-	RuntimeWorkDir          string
-	AWGBinaryPath           string
-	WGBinaryPath            string
-	IPBinaryPath            string
-	RuntimeExecTimeout      time.Duration
-	RuntimeStatsBinaryPath  string
-	RuntimeStatsArgs        []string
-	AmneziaContainerName    string
-	AmneziaInterfaceName    string
-	AmneziaPort             string
-	XrayContainerName       string
-	XrayConfigPath          string
-	XrayPublicHost          string
-	XrayRealityPort         int
-	XrayRealityServerName   string
-	XrayRealityShortID      string
-	XrayRealityPublicKey    string
-	DockerBinaryPath        string
-	VPNSubnetCIDR           string
-	VPNServerPublicEndpoint string
-	VPNServerPublicKey      string
-	VPNClientAllowedIPs     []string
-	VPNAWGJc                int
-	VPNAWGJmin              int
-	VPNAWGJmax              int
-	VPNAWGS1                int
-	VPNAWGS2                int
-	VPNAWGS3                int
-	VPNAWGS4                int
-	VPNAWGH1                string
-	VPNAWGH2                string
-	VPNAWGH3                string
-	VPNAWGH4                string
-	VPNAWGI1                string
-	VPNAWGI2                string
-	VPNAWGI3                string
-	VPNAWGI4                string
-	VPNAWGI5                string
-	VPNAWGMTU               int
-	TelegramBotToken        string
-	TelegramWebhookSecret   string
-	PublicBaseURL           string
-	TelegramStateTTL        time.Duration
-	TelegramAdminIDs        []int64
-	NodeName                string
-	ControlPlaneBaseURL     string
-	NodeHeartbeatInterval   time.Duration
-	NodeProtocolsSupported  []string
-	NodeRegistrationToken   string
-	NodeID                  string
-	NodeToken               string
-	NodeRegion              string
-	NodePublicIP            string
-	NodeCapacity            int
-	DailyChargeInterval     time.Duration
-	DailyChargeKopecks      int64
+	ServiceName                string
+	HTTPAddr                   string
+	ShutdownTimeout            time.Duration
+	LogLevel                   string
+	PostgresURL                string
+	RedisAddr                  string
+	RedisPassword              string
+	RedisDB                    int
+	ReadinessTimeout           time.Duration
+	LivenessTimeout            time.Duration
+	AgentHMACSecret            string
+	AgentHMACMaxSkew           time.Duration
+	NodeAgentBaseURL           string
+	NodeAgentSecret            string
+	NodeAgentTimeout           time.Duration
+	NodeAgentRetries           int
+	ConfigMasterKey            string
+	AdminSecret                string
+	AdminSecretHeader          string
+	NodeHealthPollInterval     time.Duration
+	NodeHealthCheckTimeout     time.Duration
+	PeerConsistencyInterval    time.Duration
+	RuntimeAdapter             string
+	RuntimeWorkDir             string
+	AWGBinaryPath              string
+	WGBinaryPath               string
+	IPBinaryPath               string
+	RuntimeExecTimeout         time.Duration
+	RuntimeStatsBinaryPath     string
+	RuntimeStatsArgs           []string
+	AmneziaContainerName       string
+	AmneziaInterfaceName       string
+	AmneziaPort                string
+	XrayContainerName          string
+	XrayConfigPath             string
+	XrayPublicHost             string
+	XrayRealityPort            int
+	XrayRealityServerName      string
+	XrayRealityShortID         string
+	XrayRealityPublicKey       string
+	DockerBinaryPath           string
+	VPNSubnetCIDR              string
+	VPNServerPublicEndpoint    string
+	VPNServerPublicKey         string
+	VPNServerPublicKeyFile     string
+	VPNServerPublicKeyFromFile bool
+	VPNClientAllowedIPs        []string
+	VPNAWGJc                   int
+	VPNAWGJmin                 int
+	VPNAWGJmax                 int
+	VPNAWGS1                   int
+	VPNAWGS2                   int
+	VPNAWGS3                   int
+	VPNAWGS4                   int
+	VPNAWGH1                   string
+	VPNAWGH2                   string
+	VPNAWGH3                   string
+	VPNAWGH4                   string
+	VPNAWGI1                   string
+	VPNAWGI2                   string
+	VPNAWGI3                   string
+	VPNAWGI4                   string
+	VPNAWGI5                   string
+	VPNAWGMTU                  int
+	TelegramBotToken           string
+	TelegramWebhookSecret      string
+	PublicBaseURL              string
+	TelegramStateTTL           time.Duration
+	TelegramAdminIDs           []int64
+	NodeName                   string
+	ControlPlaneBaseURL        string
+	NodeHeartbeatInterval      time.Duration
+	NodeProtocolsSupported     []string
+	NodeRegistrationToken      string
+	NodeID                     string
+	NodeToken                  string
+	NodeRegion                 string
+	NodePublicIP               string
+	NodeCapacity               int
+	DailyChargeInterval        time.Duration
+	DailyChargeKopecks         int64
 }
 
 // LoadConfig reads and validates service configuration from env.
@@ -139,6 +141,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		VPNSubnetCIDR:           envOrDefault("VPN_SUBNET_CIDR", "10.8.1.0/24"),
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
 		VPNServerPublicKey:      envOrDefault("VPN_SERVER_PUBLIC_KEY", ""),
+		VPNServerPublicKeyFile:  envOrDefault("VPN_SERVER_PUBLIC_KEY_FILE", ""),
 		VPNClientAllowedIPs:     csvListFromEnvOrDefault("VPN_CLIENT_ALLOWED_IPS", []string{"0.0.0.0/0", "::/0"}),
 		VPNAWGJc:                intFromEnv("VPN_AWG_JC", 4),
 		VPNAWGJmin:              intFromEnv("VPN_AWG_JMIN", 10),
@@ -174,6 +177,15 @@ func LoadConfig(serviceName string) (Config, error) {
 		NodeCapacity:            intFromEnv("NODE_CAPACITY", 0),
 		DailyChargeInterval:     durationFromEnv("DAILY_CHARGE_INTERVAL", 1*time.Hour),
 		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 800)),
+	}
+
+	if filePath := strings.TrimSpace(cfg.VPNServerPublicKeyFile); filePath != "" {
+		if data, err := os.ReadFile(filePath); err == nil {
+			if key := strings.TrimSpace(string(data)); key != "" {
+				cfg.VPNServerPublicKey = key
+				cfg.VPNServerPublicKeyFromFile = true
+			}
+		}
 	}
 
 	if cfg.HTTPAddr == "" {
