@@ -358,13 +358,15 @@ func TestLoadConfigPlaintext_RejectsStaleWireguardServerKey(t *testing.T) {
 	accRepo := &fakeAccesses{
 		byID: &access.DeviceAccess{
 			ID:                  "a1",
+			DeviceID:            "d1",
 			Protocol:            "wireguard",
 			VPNNodeID:           "n1",
-			ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = p\n[Peer]\nPublicKey = staleKey=\n"),
+			ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = staleKey=\nPresharedKey = psk\n"),
 		},
 	}
 	svc := &TelegramService{
 		Accesses:        accRepo,
+		Devices:         &fakeDevices{active: &device.Device{ID: "d1", PublicKey: "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE="}},
 		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
 		ConfigEncryptor: fakeEncryptor{},
 	}
@@ -374,6 +376,32 @@ func TestLoadConfigPlaintext_RejectsStaleWireguardServerKey(t *testing.T) {
 		t.Fatal("expected stale config error")
 	}
 	if len(accRepo.clearedIDs) != 1 || accRepo.clearedIDs[0] != "a1" {
+		t.Fatalf("expected stale blob to be cleared, got %+v", accRepo.clearedIDs)
+	}
+}
+
+func TestLoadConfigPlaintext_RejectsStaleWireguardPeerKey(t *testing.T) {
+	accRepo := &fakeAccesses{
+		byID: &access.DeviceAccess{
+			ID:                  "a2",
+			DeviceID:            "d2",
+			Protocol:            "wireguard",
+			VPNNodeID:           "n1",
+			ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n"),
+		},
+	}
+	svc := &TelegramService{
+		Accesses:        accRepo,
+		Devices:         &fakeDevices{active: &device.Device{ID: "d2", PublicKey: "KS3O5dK5fty5waMzWBFE92ovd3xpOEOEY6P2j84a+Cg="}},
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
+		ConfigEncryptor: fakeEncryptor{},
+	}
+
+	_, err := svc.loadConfigPlaintext(context.Background(), "a2")
+	if err == nil {
+		t.Fatal("expected stale config error")
+	}
+	if len(accRepo.clearedIDs) != 1 || accRepo.clearedIDs[0] != "a2" {
 		t.Fatalf("expected stale blob to be cleared, got %+v", accRepo.clearedIDs)
 	}
 }

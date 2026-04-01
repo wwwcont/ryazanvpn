@@ -559,6 +559,9 @@ func validateXrayConfig(cfg map[string]any) error {
 		if !ok {
 			return fmt.Errorf("xray config validation failed: inbounds[%d].settings is required", i)
 		}
+		if !strings.EqualFold(strings.TrimSpace(asString(settings["decryption"])), "none") {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].settings.decryption must be none", i)
+		}
 		if _, ok := settings["clients"].([]any); !ok {
 			return fmt.Errorf("xray config validation failed: inbounds[%d].settings.clients must be an array", i)
 		}
@@ -568,6 +571,9 @@ func validateXrayConfig(cfg map[string]any) error {
 		}
 		if !strings.EqualFold(strings.TrimSpace(asString(streamSettings["security"])), "reality") {
 			return fmt.Errorf("xray config validation failed: inbounds[%d].streamSettings.security must be reality", i)
+		}
+		if _, ok := streamSettings["realitySettings"].(map[string]any); !ok {
+			return fmt.Errorf("xray config validation failed: inbounds[%d].streamSettings.realitySettings is required", i)
 		}
 		return nil
 	}

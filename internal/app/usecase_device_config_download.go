@@ -16,6 +16,8 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/infra/wgkeys"
 )
 
+const redactedHashPrefixLen = 12
+
 type IssueDeviceConfigInput struct {
 	DeviceAccessID   string
 	Protocol         string
@@ -128,16 +130,44 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		return nil, err
 	}
 	if protocol == "wireguard" {
-		renderedServerPublicKey, parseErr := extractWireguardPeerPublicKey(cfg)
+		if shouldFallbackAmneziaParams(in.AWG) {
+			slog.Info("amnezia.runtime.params.expected",
+				"access_id", in.DeviceAccessID,
+				"jc", in.AWG.Jc, "jmin", in.AWG.Jmin, "jmax", in.AWG.Jmax,
+				"s1", in.AWG.S1, "s2", in.AWG.S2, "s3", in.AWG.S3, "s4", in.AWG.S4,
+				"h1", in.AWG.H1, "h2", in.AWG.H2, "h3", in.AWG.H3, "h4", in.AWG.H4,
+				"i1", in.AWG.I1, "i2", in.AWG.I2, "i3", in.AWG.I3, "i4", in.AWG.I4, "i5", in.AWG.I5,
+			)
+			slog.Info("amnezia.runtime.params.actual", "access_id", in.DeviceAccessID, "mode", "fallback_without_custom_params")
+			slog.Warn("amnezia.runtime.params.mismatch", "access_id", in.DeviceAccessID, "reason", "custom_params_not_verified_on_runtime", "action", "render_without_custom_params")
+			cfg = stripAmneziaCustomParams(cfg)
+		}
+		parsedCfg, parseErr := parseWireguardConfig(cfg)
 		if parseErr != nil {
 			slog.Error("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "error", parseErr)
 			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", parseErr)
 			return nil, parseErr
 		}
+		slog.Info("wg.config.render.preshared_key_hash", "access_id", in.DeviceAccessID, "hash", redactHash(parsedCfg.PresharedKey))
+		slog.Info("wg.config.render.client_public_key", "access_id", in.DeviceAccessID, "value", parsedCfg.ClientPublicKey)
+		slog.Info("wg.config.render.runtime_peer_public_key", "access_id", in.DeviceAccessID, "value", strings.TrimSpace(in.DevicePublicKey))
 		expected := strings.TrimSpace(in.ServerPublicKey)
-		if expected != "" && !strings.EqualFold(renderedServerPublicKey, expected) {
-			err = fmt.Errorf("rendered wireguard server public key mismatch: rendered=%q expected=%q", renderedServerPublicKey, expected)
+		if expected != "" && !strings.EqualFold(parsedCfg.ServerPublicKey, expected) {
+			err = fmt.Errorf("rendered wireguard server public key mismatch: rendered=%q expected=%q", parsedCfg.ServerPublicKey, expected)
 			slog.Error("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "error", err)
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
+			return nil, err
+		}
+		expectedPSK := strings.TrimSpace(in.PresharedKey)
+		if expectedPSK != "" && !strings.EqualFold(parsedCfg.PresharedKey, expectedPSK) {
+			err = fmt.Errorf("rendered wireguard preshared key mismatch")
+			slog.Error("wg.config.render.preshared_key_hash", "access_id", in.DeviceAccessID, "error", err, "rendered_hash", redactHash(parsedCfg.PresharedKey), "expected_hash", redactHash(expectedPSK))
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
+			return nil, err
+		}
+		if valErr := wgkeys.ValidateKeyPair(parsedCfg.ClientPrivateKey, strings.TrimSpace(in.DevicePublicKey)); strings.TrimSpace(in.DevicePublicKey) != "" && valErr != nil {
+			err = fmt.Errorf("rendered wireguard client key mismatch: %w", valErr)
+			slog.Error("wg.config.render.client_public_key", "access_id", in.DeviceAccessID, "error", err)
 			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", protocol, "error", err)
 			return nil, err
 		}
@@ -181,7 +211,65 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	return &IssueDeviceConfigOutput{Token: rawToken, ExpiresAt: expiresAt, QRPayload: base64.StdEncoding.EncodeToString([]byte(cfg))}, nil
 }
 
-func extractWireguardPeerPublicKey(config string) (string, error) {
+type parsedWireguardConfig struct {
+	ClientPrivateKey string
+	ClientPublicKey  string
+	ServerPublicKey  string
+	PresharedKey     string
+}
+
+var amneziaCustomParamKeys = map[string]struct{}{
+	"jc":   {},
+	"jmin": {},
+	"jmax": {},
+	"s1":   {},
+	"s2":   {},
+	"s3":   {},
+	"s4":   {},
+	"h1":   {},
+	"h2":   {},
+	"h3":   {},
+	"h4":   {},
+	"i1":   {},
+	"i2":   {},
+	"i3":   {},
+	"i4":   {},
+	"i5":   {},
+}
+
+func shouldFallbackAmneziaParams(awg DefaultVPNAWGFields) bool {
+	return awg.Jc != 0 || awg.Jmin != 0 || awg.Jmax != 0 ||
+		awg.S1 != 0 || awg.S2 != 0 || awg.S3 != 0 || awg.S4 != 0 ||
+		strings.TrimSpace(awg.H1) != "" || strings.TrimSpace(awg.H2) != "" || strings.TrimSpace(awg.H3) != "" || strings.TrimSpace(awg.H4) != "" ||
+		strings.TrimSpace(awg.I1) != "" || strings.TrimSpace(awg.I2) != "" || strings.TrimSpace(awg.I3) != "" || strings.TrimSpace(awg.I4) != "" || strings.TrimSpace(awg.I5) != ""
+}
+
+func stripAmneziaCustomParams(config string) string {
+	out := make([]string, 0, len(strings.Split(config, "\n")))
+	inInterface := false
+	for _, raw := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inInterface = strings.EqualFold(line, "[Interface]")
+			out = append(out, raw)
+			continue
+		}
+		if inInterface {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				if _, ok := amneziaCustomParamKeys[strings.ToLower(strings.TrimSpace(parts[0]))]; ok {
+					continue
+				}
+			}
+		}
+		out = append(out, raw)
+	}
+	return strings.Join(out, "\n")
+}
+
+func parseWireguardConfig(config string) (parsedWireguardConfig, error) {
+	var out parsedWireguardConfig
+	currentSection := ""
 	inPeerSection := false
 	for _, raw := range strings.Split(config, "\n") {
 		line := strings.TrimSpace(raw)
@@ -189,26 +277,52 @@ func extractWireguardPeerPublicKey(config string) (string, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.TrimSpace(line)
 			inPeerSection = strings.EqualFold(line, "[Peer]")
-			continue
-		}
-		if !inPeerSection {
-			continue
-		}
-		if !strings.HasPrefix(strings.ToLower(line), "publickey") {
 			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
-			return "", fmt.Errorf("invalid wireguard public key line")
+			return parsedWireguardConfig{}, fmt.Errorf("invalid wireguard config line")
 		}
-		key := strings.TrimSpace(parts[1])
-		if key == "" {
-			return "", fmt.Errorf("wireguard peer public key is empty")
+		k := strings.TrimSpace(strings.ToLower(parts[0]))
+		v := strings.TrimSpace(parts[1])
+		switch {
+		case strings.EqualFold(currentSection, "[Interface]") && k == "privatekey":
+			out.ClientPrivateKey = v
+		case inPeerSection && k == "publickey":
+			out.ServerPublicKey = v
+		case inPeerSection && k == "presharedkey":
+			out.PresharedKey = v
 		}
-		return key, nil
 	}
-	return "", fmt.Errorf("wireguard peer public key not found in rendered config")
+	if strings.TrimSpace(out.ClientPrivateKey) == "" {
+		return parsedWireguardConfig{}, fmt.Errorf("wireguard client private key not found in rendered config")
+	}
+	if strings.TrimSpace(out.ServerPublicKey) == "" {
+		return parsedWireguardConfig{}, fmt.Errorf("wireguard peer public key not found in rendered config")
+	}
+	if strings.TrimSpace(out.PresharedKey) == "" {
+		return parsedWireguardConfig{}, fmt.Errorf("wireguard peer preshared key not found in rendered config")
+	}
+	pub, err := wgkeys.DerivePublicKey(out.ClientPrivateKey)
+	if err != nil {
+		return parsedWireguardConfig{}, fmt.Errorf("derive wireguard client public key from rendered private key: %w", err)
+	}
+	out.ClientPublicKey = pub
+	return out, nil
+}
+
+func redactHash(v string) string {
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return ""
+	}
+	h := hashToken(trimmed)
+	if len(h) <= redactedHashPrefixLen {
+		return h
+	}
+	return h[:redactedHashPrefixLen]
 }
 
 type DownloadDeviceConfigByToken struct {

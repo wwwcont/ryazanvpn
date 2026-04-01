@@ -99,7 +99,7 @@ func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 
 func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	workDir := t.TempDir()
-	config := `{"inbounds":[{"port":443,"listen":"0.0.0.0","protocol":"vless","settings":{"clients":[]},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443","serverNames":["google.com"],"privateKey":"test","shortIds":["0123456789abcdef"]}}}]}`
+	config := `{"inbounds":[{"port":443,"listen":"0.0.0.0","protocol":"vless","settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443","serverNames":["google.com"],"privateKey":"test","shortIds":["0123456789abcdef"]}}}]}`
 	var stagedConfig string
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
