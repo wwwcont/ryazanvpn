@@ -127,6 +127,9 @@ func main() {
 					PublicEndpoint:   cfg.VPNServerPublicEndpoint,
 					ClientAllowedIPs: cfg.VPNClientAllowedIPs,
 					MTU:              cfg.VPNAWGMTU,
+					XrayPublicHost:   cfg.XrayPublicHost,
+					XrayRealityPort:  cfg.XrayRealityPort,
+					XrayRealitySNI:   cfg.XrayRealityServerName,
 					DefaultVPNAWG: app.DefaultVPNAWGFields{
 						Jc:   cfg.VPNAWGJc,
 						Jmin: cfg.VPNAWGJmin,
@@ -161,6 +164,12 @@ func main() {
 				AdminIDs:        adminIDs,
 				ConfigEncryptor: encryptor,
 				VPNExporter:     vpnkey.NewDefaultVPNExporter(),
+				XrayExporter:    vpnkey.NewXrayRealityExporter(),
+				XrayPublicHost:  cfg.XrayPublicHost,
+				XrayRealityPort: cfg.XrayRealityPort,
+				XrayServerName:  cfg.XrayRealityServerName,
+				XrayShortID:     cfg.XrayRealityShortID,
+				XrayPublicKey:   cfg.XrayRealityPublicKey,
 				Finance:         financeSvc,
 				DefaultVPNMTU:   cfg.VPNAWGMTU,
 				DefaultVPNAWG: app.DefaultVPNAWGFields{

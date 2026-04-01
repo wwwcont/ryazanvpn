@@ -31,6 +31,8 @@ type IssueDeviceConfigInput struct {
 	Keepalive        int
 	AllowedIPs       []string
 	AWG              DefaultVPNAWGFields
+	XrayUserUUID     string
+	XrayServerName   string
 	TokenTTL         time.Duration
 }
 
@@ -63,35 +65,43 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
 		return nil, err
 	}
-	derivedPublicKey, err := wgkeys.DerivePublicKey(in.DevicePrivateKey)
-	if err != nil {
-		slog.Error("config keypair derivation failed", "device_access_id", in.DeviceAccessID, "error", err)
-		slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
-		return nil, fmt.Errorf("derive public key from private key: %w", err)
-	}
-	if strings.TrimSpace(in.DevicePublicKey) != "" {
-		if err := wgkeys.ValidateKeyPair(in.DevicePrivateKey, in.DevicePublicKey); err != nil {
-			slog.Error("config keypair mismatch", "device_access_id", in.DeviceAccessID, "stored_public_key", in.DevicePublicKey, "derived_public_key", derivedPublicKey)
-			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", err)
-			return nil, fmt.Errorf("device key mismatch: stored public key does not match private key")
-		}
-	}
-
 	protocol := strings.TrimSpace(in.Protocol)
 	if protocol == "" {
 		protocol = "wireguard"
 	}
+	if strings.EqualFold(protocol, "amnezia") || strings.EqualFold(protocol, "amneziawg") {
+		protocol = "wireguard"
+	}
+	protocol = strings.ToLower(protocol)
 	var cfg string
-	if protocol == "xray" {
+	switch protocol {
+	case "xray":
+		userUUID := strings.TrimSpace(in.XrayUserUUID)
+		if userUUID == "" {
+			userUUID = hashToken(in.DeviceAccessID)[:32]
+		}
 		cfg, err = uc.Renderer.RenderXrayReality(RenderXrayRealityInput{
 			DeviceID:     in.DeviceAccessID,
-			DevicePublic: derivedPublicKey,
-			ServerName:   "www.cloudflare.com",
+			DevicePublic: strings.TrimSpace(in.DevicePublicKey),
+			ServerName:   strings.TrimSpace(in.XrayServerName),
 			ServerHost:   in.EndpointHost,
 			ServerPort:   in.EndpointPort,
-			UserUUID:     hashToken(in.DeviceAccessID)[:32],
+			UserUUID:     userUUID,
 		})
-	} else {
+	case "wireguard":
+		derivedPublicKey, derErr := wgkeys.DerivePublicKey(in.DevicePrivateKey)
+		if derErr != nil {
+			slog.Error("config keypair derivation failed", "device_access_id", in.DeviceAccessID, "error", derErr)
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", derErr)
+			return nil, fmt.Errorf("derive public key from private key: %w", derErr)
+		}
+		if strings.TrimSpace(in.DevicePublicKey) != "" {
+			if valErr := wgkeys.ValidateKeyPair(in.DevicePrivateKey, in.DevicePublicKey); valErr != nil {
+				slog.Error("config keypair mismatch", "device_access_id", in.DeviceAccessID, "stored_public_key", in.DevicePublicKey, "derived_public_key", derivedPublicKey)
+				slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "error", valErr)
+				return nil, fmt.Errorf("device key mismatch: stored public key does not match private key")
+			}
+		}
 		cfg, err = uc.Renderer.RenderAmneziaWG(RenderAmneziaWGInput{
 			DevicePrivateKey: in.DevicePrivateKey,
 			ServerPublicKey:  in.ServerPublicKey,
@@ -105,6 +115,8 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 			AllowedIPs:       in.AllowedIPs,
 			AWG:              in.AWG,
 		})
+	default:
+		err = fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "missing required fields") {

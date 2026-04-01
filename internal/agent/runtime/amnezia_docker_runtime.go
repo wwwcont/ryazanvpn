@@ -102,10 +102,7 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 		return OperationResult{}, err
 	}
 	if strings.EqualFold(strings.TrimSpace(req.Protocol), "xray") {
-		r.mu.Lock()
-		r.peersByKey[req.PeerPublicKey] = PeerState{DeviceAccessID: req.DeviceAccessID, Protocol: "xray", PeerPublicKey: req.PeerPublicKey, AssignedIP: req.AssignedIP, Keepalive: req.Keepalive, UpdatedAt: time.Now().UTC()}
-		r.mu.Unlock()
-		r.log("runtime.amnezia_docker.apply_peer.xray.accepted", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID))
+		r.log("runtime.amnezia_docker.apply_peer.xray.skipped", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID))
 		return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
 	}
 
@@ -136,9 +133,6 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 		args = append(args, "preshared-key", cleanupPath)
 	}
 	args = append(args, "allowed-ips", assignedIP+"/32")
-	if req.Keepalive > 0 {
-		args = append(args, "persistent-keepalive", strconv.Itoa(req.Keepalive))
-	}
 
 	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: args, Timeout: r.commandTimeout()})
 	if err != nil {
@@ -152,7 +146,12 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 	r.peersByKey[req.PeerPublicKey] = PeerState{DeviceAccessID: req.DeviceAccessID, PeerPublicKey: req.PeerPublicKey, AssignedIP: assignedIP, Keepalive: req.Keepalive, UpdatedAt: time.Now().UTC()}
 	r.mu.Unlock()
 
-	r.log("runtime.amnezia_docker.apply_peer.ok", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.String("peer_public_key", req.PeerPublicKey), slog.String("assigned_ip", assignedIP))
+	r.log("runtime.amnezia_docker.apply_peer.server_config_written",
+		slog.String("operation_id", req.OperationID),
+		slog.String("device_access_id", req.DeviceAccessID),
+		slog.String("peer_public_key", req.PeerPublicKey),
+		slog.String("assigned_ip", assignedIP),
+	)
 	return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
 }
 
@@ -161,9 +160,7 @@ func (r *AmneziaDockerRuntime) RevokePeer(ctx context.Context, req PeerOperation
 		return OperationResult{}, errors.New("operation_id, device_access_id and peer_public_key are required")
 	}
 	if strings.EqualFold(strings.TrimSpace(req.Protocol), "xray") {
-		r.mu.Lock()
-		delete(r.peersByKey, req.PeerPublicKey)
-		r.mu.Unlock()
+		r.log("runtime.amnezia_docker.revoke_peer.xray.skipped", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID))
 		return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
 	}
 

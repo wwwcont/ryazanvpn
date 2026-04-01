@@ -63,7 +63,12 @@ func (w PeerConsistencyWorker) check(ctx context.Context) {
 func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access.DeviceAccess, runtimePeers []NodeTrafficCounter) {
 	dbByAccessID := make(map[string]*access.DeviceAccess, len(dbPeers))
 	dbByIP := make(map[string]*access.DeviceAccess, len(dbPeers))
+	filtered := make([]*access.DeviceAccess, 0, len(dbPeers))
 	for _, p := range dbPeers {
+		if p == nil || strings.EqualFold(strings.TrimSpace(p.Protocol), "xray") {
+			continue
+		}
+		filtered = append(filtered, p)
 		dbByAccessID[p.ID] = p
 		if p.AssignedIP != nil && strings.TrimSpace(*p.AssignedIP) != "" {
 			dbByIP[*p.AssignedIP] = p
@@ -72,6 +77,9 @@ func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access
 
 	seenAccessIDs := make(map[string]struct{}, len(runtimePeers))
 	for _, rp := range runtimePeers {
+		if strings.EqualFold(strings.TrimSpace(rp.Protocol), "xray") {
+			continue
+		}
 		id := strings.TrimSpace(rp.DeviceAccessID)
 		if id != "" {
 			if _, ok := dbByAccessID[id]; !ok {
@@ -93,7 +101,7 @@ func (w PeerConsistencyWorker) compareNodePeers(nodeID string, dbPeers []*access
 		}
 	}
 
-	for _, p := range dbPeers {
+	for _, p := range filtered {
 		if _, ok := seenAccessIDs[p.ID]; ok {
 			continue
 		}

@@ -30,6 +30,27 @@ func TestPeerConsistencyWorker_LogsMismatches(t *testing.T) {
 	}
 }
 
+func TestPeerConsistencyWorker_IgnoresXrayProtocol(t *testing.T) {
+	repo := &pcNodeRepo{nodes: []*node.Node{{ID: "n1", AgentBaseURL: "http://n1"}}}
+	accessRepo := &pcAccessRepo{byNode: map[string][]*access.DeviceAccess{
+		"n1": {{ID: "a-xray", Protocol: "xray", AssignedIP: strPtrPC("10.0.0.9/32")}},
+	}}
+	logs := &pcLogCollector{}
+	worker := PeerConsistencyWorker{
+		Logger:   slog.New(logs),
+		Nodes:    repo,
+		Accesses: accessRepo,
+		ClientFactory: &pcFactory{items: []NodeTrafficCounter{
+			{DeviceAccessID: "a-xray", Protocol: "xray", AllowedIP: "10.0.0.9/32"},
+		}},
+	}
+
+	worker.check(context.Background())
+	if logs.warnCount != 0 {
+		t.Fatalf("expected no mismatch logs for xray protocol, got %d", logs.warnCount)
+	}
+}
+
 type pcNodeRepo struct{ nodes []*node.Node }
 
 func (r *pcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }

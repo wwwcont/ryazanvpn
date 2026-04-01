@@ -52,7 +52,7 @@ LIMIT 1`
 func (r *TrafficRepository) AddDailyUsageDelta(ctx context.Context, in traffic.AddDailyUsageDeltaParams) error {
 	const queryLegacy = `
 INSERT INTO traffic_usage_daily (device_id, usage_date, rx_bytes, tx_bytes, total_bytes)
-VALUES ($1, $2::date, $3, $4, $3+$4)
+VALUES ($1, $2::date, $3::bigint, $4::bigint, ($3::bigint + $4::bigint))
 ON CONFLICT (device_id, usage_date)
 DO UPDATE SET
   rx_bytes = traffic_usage_daily.rx_bytes + EXCLUDED.rx_bytes,
@@ -71,7 +71,7 @@ DO UPDATE SET
 	}
 	const queryDailyProtocol = `
 INSERT INTO traffic_usage_daily_protocol (device_id, vpn_node_id, protocol, usage_date, rx_bytes, tx_bytes, total_bytes)
-VALUES ($1, $2, $3, $4::date, $5, $6, $5+$6)
+VALUES ($1, $2, $3, $4::date, $5::bigint, $6::bigint, ($5::bigint + $6::bigint))
 ON CONFLICT (device_id, vpn_node_id, protocol, usage_date)
 DO UPDATE SET
   rx_bytes = traffic_usage_daily_protocol.rx_bytes + EXCLUDED.rx_bytes,
@@ -88,7 +88,7 @@ DO UPDATE SET
 	}
 	const queryMonthly = `
 INSERT INTO traffic_usage_monthly (device_id, vpn_node_id, protocol, usage_month, rx_bytes, tx_bytes, total_bytes)
-VALUES ($1, $2, $3, $4::date, $5, $6, $5+$6)
+VALUES ($1, $2, $3, $4::date, $5::bigint, $6::bigint, ($5::bigint + $6::bigint))
 ON CONFLICT (device_id, vpn_node_id, protocol, usage_month)
 DO UPDATE SET
   rx_bytes = traffic_usage_monthly.rx_bytes + EXCLUDED.rx_bytes,
