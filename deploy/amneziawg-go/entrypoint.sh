@@ -11,6 +11,7 @@ EXPECTED_PORT="${AMNEZIA_PORT:-${AMNEZIA_LISTEN_PORT:-}}"
 DEFAULT_SUBNET="${AMNEZIA_SUBNET:-10.8.1.0/24}"
 NAT_ENABLED="${AMNEZIA_NAT_ENABLED:-1}"
 EGRESS_IFACE="${AMNEZIA_EGRESS_IFACE:-}"
+PUBLIC_KEY_PATH="${AMNEZIA_PUBLIC_KEY_PATH:-/etc/amnezia/server.publickey}"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -109,6 +110,55 @@ ensure_listen_port() {
     }
   ' "$conf" > "$tmp"
   mv "$tmp" "$conf"
+}
+
+extract_interface_private_key() {
+  conf="$1"
+  awk '
+    BEGIN { in_interface = 0 }
+    /^[[:space:]]*\[Interface\][[:space:]]*$/ { in_interface = 1; next }
+    /^[[:space:]]*\[/ { in_interface = 0; next }
+    in_interface {
+      line = $0
+      sub(/[[:space:]]*[#;].*$/, "", line)
+      if (line ~ /^[[:space:]]*PrivateKey[[:space:]]*=/) {
+        split(line, kv, "=")
+        value = kv[2]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        if (value != "") {
+          print value
+          exit 0
+        }
+      }
+    }
+  ' "$conf"
+}
+
+write_server_public_key() {
+  conf="$1"
+  private_key="$(extract_interface_private_key "$conf")"
+  if [ -z "$private_key" ]; then
+    echo "amnezia.server_public_key.error reason=private_key_not_found config=$conf" >&2
+    return 1
+  fi
+
+  if ! public_key="$(printf '%s\n' "$private_key" | awg pubkey 2>/dev/null)"; then
+    echo "amnezia.server_public_key.error reason=pubkey_calculation_failed config=$conf" >&2
+    return 1
+  fi
+
+  public_key="$(printf '%s' "$public_key" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  if [ -z "$public_key" ]; then
+    echo "amnezia.server_public_key.error reason=empty_pubkey config=$conf" >&2
+    return 1
+  fi
+
+  public_key_dir="$(dirname "$PUBLIC_KEY_PATH")"
+  mkdir -p "$public_key_dir"
+  umask 077
+  printf '%s\n' "$public_key" > "$PUBLIC_KEY_PATH"
+
+  echo "amnezia.server_public_key.ready path=$PUBLIC_KEY_PATH value=$public_key" >&2
 }
 
 extract_addresses() {
@@ -234,6 +284,7 @@ main() {
   fi
   ensure_listen_port "$conf"
   echo "amnezia.server_config.selected path=$conf" >&2
+  write_server_public_key "$conf"
 
   start_runtime
   apply_config "$conf"

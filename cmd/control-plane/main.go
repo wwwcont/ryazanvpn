@@ -38,6 +38,12 @@ func main() {
 
 	logger := logging.NewJSONLogger(cfg.LogLevel)
 	logger.Info("starting service", slog.String("config", cfg.String()))
+	logger.Info(
+		"vpn server key source resolved",
+		slog.Bool("has_vpn_server_public_key", strings.TrimSpace(cfg.VPNServerPublicKey) != ""),
+		slog.String("vpn_server_public_key_file", strings.TrimSpace(cfg.VPNServerPublicKeyFile)),
+		slog.Bool("vpn_server_public_key_file_override_used", cfg.VPNServerPublicKeyFromFile),
+	)
 
 	ctx := context.Background()
 	pg, err := db.NewPool(ctx, cfg.PostgresURL)
