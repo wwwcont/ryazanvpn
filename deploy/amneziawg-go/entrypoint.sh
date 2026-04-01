@@ -72,9 +72,7 @@ create_interface() {
     return
   fi
 
-  ip link add "$IFACE" type amneziawg 2>/dev/null \
-    || ip link add "$IFACE" type wireguard 2>/dev/null \
-    || true
+  ip link add "$IFACE" type wireguard 2>/dev/null \
 
   if ! ip link show "$IFACE" >/dev/null 2>&1; then
     echo "failed to create interface $IFACE (neither amneziawg nor wireguard type available)" >&2
