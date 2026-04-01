@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 MIGRATE ?= migrate
-POSTGRES_URL ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
+POSTGRES_URL ?= postgres://ryazanvpn:ryazanvpn_local_pass@localhost:5432/ryazanvpn?sslmode=disable
 POSTGRES_DSN ?= $(POSTGRES_URL)
 SINGLE_ENV ?= .env.single.generated
 SINGLE_COMPOSE = ./scripts/compose-with-env.sh $(SINGLE_ENV) -f docker-compose.single.yml
