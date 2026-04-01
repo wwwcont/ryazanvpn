@@ -196,7 +196,7 @@ func (r *AmneziaDockerRuntime) RevokePeer(ctx context.Context, req PeerOperation
 }
 
 func (r *AmneziaDockerRuntime) ListPeerStats(ctx context.Context) ([]PeerStat, error) {
-	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.ContainerName, "awg", "show", "all", "dump"}, Timeout: r.commandTimeout()})
+	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.ContainerName, "awg", "show", r.cfg.InterfaceName, "dump"}, Timeout: r.commandTimeout()})
 	if err != nil || res.ExitCode != 0 {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -204,10 +204,10 @@ func (r *AmneziaDockerRuntime) ListPeerStats(ctx context.Context) ([]PeerStat, e
 		for _, peer := range r.peersByKey {
 			if strings.EqualFold(strings.TrimSpace(peer.Protocol), "xray") {
 				stats = append(stats, PeerStat{
-					Protocol:      "xray",
+					Protocol:       "xray",
 					DeviceAccessID: peer.DeviceAccessID,
-					PeerPublicKey: peer.PeerPublicKey,
-					AllowedIP:     peer.AssignedIP,
+					PeerPublicKey:  peer.PeerPublicKey,
+					AllowedIP:      peer.AssignedIP,
 				})
 			}
 		}
@@ -237,16 +237,25 @@ func (r *AmneziaDockerRuntime) ListPeerStats(ctx context.Context) ([]PeerStat, e
 func ParseAWGShowAllDump(out string) ([]PeerStat, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	stats := make([]PeerStat, 0, len(lines))
-	for _, line := range lines {
+
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+
+		// первая строка dump — это описание интерфейса, а не peer
+		if i == 0 {
+			continue
+		}
+
 		parts := strings.Split(line, "\t")
 		if len(parts) < 8 {
 			continue
 		}
+
 		allowed := firstAllowedIP(parts[3])
+
 		handshake, err := strconv.ParseInt(parts[4], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid handshake timestamp %q", parts[4])
@@ -259,13 +268,26 @@ func ParseAWGShowAllDump(out string) ([]PeerStat, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid tx bytes %q", parts[6])
 		}
+
 		var hs *time.Time
 		if handshake > 0 {
 			t := time.Unix(handshake, 0).UTC()
 			hs = &t
 		}
-		stats = append(stats, PeerStat{Protocol: "wireguard", PeerPublicKey: parts[0], PresharedKey: parts[1], Endpoint: parts[2], AllowedIP: allowed, LatestHandshakeUnixTime: handshake, RXTotalBytes: rx, TXTotalBytes: tx, LastHandshakeAt: hs})
+
+		stats = append(stats, PeerStat{
+			Protocol:                "wireguard",
+			PeerPublicKey:           parts[0],
+			PresharedKey:            parts[1],
+			Endpoint:                parts[2],
+			AllowedIP:               allowed,
+			LatestHandshakeUnixTime: handshake,
+			RXTotalBytes:            rx,
+			TXTotalBytes:            tx,
+			LastHandshakeAt:         hs,
+		})
 	}
+
 	return stats, nil
 }
 
