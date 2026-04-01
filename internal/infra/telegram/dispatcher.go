@@ -689,6 +689,15 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 				s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", "wireguard", "action", "skip_broken_access")
 				continue
 			}
+			fresh, checkErr := s.isWireguardConfigBlobCurrent(ctx, item)
+			if checkErr != nil {
+				s.logErr("wireguard config freshness check failed", checkErr)
+				continue
+			}
+			if !fresh {
+				s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", item.ID, "protocol", "wireguard", "action", "stale_server_public_key")
+				continue
+			}
 			accessID = item.ID
 			break
 		}
@@ -1333,6 +1342,17 @@ func (s *TelegramService) resolveActiveAccessIDByProtocol(ctx context.Context, u
 			s.logInfo("telegram.config_blob.empty", "user_id", userID, "access_id", item.ID, "protocol", protocol, "action", "skip_broken_access")
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(item.Protocol), "wireguard") {
+			fresh, checkErr := s.isWireguardConfigBlobCurrent(ctx, item)
+			if checkErr != nil {
+				s.logErr("wireguard config freshness check failed", checkErr)
+				continue
+			}
+			if !fresh {
+				s.logInfo("telegram.config_blob.empty", "user_id", userID, "access_id", item.ID, "protocol", protocol, "action", "stale_server_public_key")
+				continue
+			}
+		}
 		if strings.EqualFold(strings.TrimSpace(item.Protocol), strings.TrimSpace(protocol)) {
 			return item.ID, nil
 		}
@@ -1356,7 +1376,104 @@ func (s *TelegramService) loadConfigPlaintext(ctx context.Context, accessID stri
 	if err != nil {
 		return "", err
 	}
-	return string(plain), nil
+	configPlain := string(plain)
+	if strings.EqualFold(strings.TrimSpace(acc.Protocol), "wireguard") {
+		ok, checkErr := s.validateWireguardConfigServerKey(ctx, acc, configPlain)
+		if checkErr != nil {
+			s.logErr("wireguard config server key validation failed", checkErr)
+			return "", checkErr
+		}
+		if !ok {
+			return "", fmt.Errorf("wireguard config is stale for access_id=%s", accessID)
+		}
+	}
+	return configPlain, nil
+}
+
+func (s *TelegramService) isWireguardConfigBlobCurrent(ctx context.Context, acc *access.DeviceAccess) (bool, error) {
+	if acc == nil {
+		return false, fmt.Errorf("wireguard access is nil")
+	}
+	if len(acc.ConfigBlobEncrypted) == 0 {
+		return false, nil
+	}
+	if s.ConfigEncryptor == nil {
+		return false, fmt.Errorf("config decryptor is not configured")
+	}
+	plain, err := s.ConfigEncryptor.Decrypt(acc.ConfigBlobEncrypted)
+	if err != nil {
+		return false, err
+	}
+	return s.validateWireguardConfigServerKey(ctx, acc, string(plain))
+}
+
+func (s *TelegramService) validateWireguardConfigServerKey(ctx context.Context, acc *access.DeviceAccess, configPlain string) (bool, error) {
+	if acc == nil || !strings.EqualFold(strings.TrimSpace(acc.Protocol), "wireguard") {
+		return true, nil
+	}
+	renderedKey, err := parseWireguardPeerPublicKey(configPlain)
+	if err != nil {
+		return false, err
+	}
+	currentKey, err := s.currentNodeServerPublicKey(ctx, acc)
+	if err != nil {
+		return false, err
+	}
+	if currentKey == "" {
+		return true, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(renderedKey), strings.TrimSpace(currentKey)) {
+		return true, nil
+	}
+	s.logErr("VPN_SERVER_PUBLIC_KEY mismatch in rendered config", fmt.Errorf("access_id=%s rendered=%q current=%q", acc.ID, renderedKey, currentKey))
+	if s.Accesses != nil {
+		_ = s.Accesses.ClearConfigBlobEncrypted(ctx, acc.ID)
+	}
+	return false, nil
+}
+
+func (s *TelegramService) currentNodeServerPublicKey(ctx context.Context, acc *access.DeviceAccess) (string, error) {
+	if acc == nil {
+		return "", nil
+	}
+	if s.Nodes == nil || strings.TrimSpace(acc.VPNNodeID) == "" {
+		return "", nil
+	}
+	n, err := s.Nodes.GetByID(ctx, acc.VPNNodeID)
+	if err != nil {
+		return "", err
+	}
+	if n == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(n.ServerPublicKey), nil
+}
+
+func parseWireguardPeerPublicKey(config string) (string, error) {
+	inPeerSection := false
+	for _, raw := range strings.Split(config, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inPeerSection = strings.EqualFold(line, "[Peer]")
+			continue
+		}
+		if !inPeerSection || !strings.HasPrefix(strings.ToLower(line), "publickey") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return "", fmt.Errorf("invalid wireguard public key line")
+		}
+		out := strings.TrimSpace(parts[1])
+		if out == "" {
+			return "", fmt.Errorf("wireguard peer public key is empty")
+		}
+		return out, nil
+	}
+	return "", fmt.Errorf("wireguard peer public key not found")
 }
 
 func (s *TelegramService) isAdmin(telegramID int64) bool {
