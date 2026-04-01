@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/app"
@@ -129,9 +130,20 @@ type TelegramService struct {
 	}
 	DefaultVPNMTU int
 	DefaultVPNAWG app.DefaultVPNAWGFields
+
+	processingMu    sync.Mutex
+	processingUsers map[int64]struct{}
 }
 
 func (s *TelegramService) HandleUpdate(ctx context.Context, upd Update) {
+	telegramUserID, chatID, ok := userAndChatFromUpdate(upd)
+	if ok {
+		if !s.tryLockUser(telegramUserID) {
+			s.sendErrorReplyMessage(chatID, "Предыдущая операция ещё обрабатывается, попробуйте через пару секунд.", nil, "telegram_user_id", telegramUserID)
+			return
+		}
+		defer s.unlockUser(telegramUserID)
+	}
 	if upd.CallbackQuery != nil {
 		s.handleCallback(ctx, upd.CallbackQuery)
 		return
@@ -451,7 +463,7 @@ func (s *TelegramService) ensureUser(ctx context.Context, from User, chatID int6
 	u, err := s.RegisterUC.Execute(ctx, app.RegisterTelegramUserInput{TelegramID: from.ID, Username: from.Username, FirstName: from.FirstName, LastName: from.LastName})
 	if err != nil {
 		s.logErr("register user", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось обработать запрос. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Не удалось обработать запрос. Попробуйте позже.", nil, "telegram_user_id", from.ID)
 		return nil, false
 	}
 	return u, true
@@ -471,16 +483,17 @@ func (s *TelegramService) promptInviteCode(ctx context.Context, chatID, telegram
 }
 
 func (s *TelegramService) handleInviteCode(ctx context.Context, chatID, telegramID int64, userID, code string) {
+	startedAt := time.Now()
 	s.logInfo("telegram.activate_invite.start", "telegram_user_id", telegramID, "chat_id", chatID, "invite_code", code, "user_id", userID)
 	grant, err := s.AccessGrants.GetLatestByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, accessgrant.ErrNotFound) {
 		s.logErr("get active access grant", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Ошибка проверки доступа. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Ошибка проверки доступа. Попробуйте позже.", nil, "telegram_user_id", telegramID, "user_id", userID, "invite_code", code, "duration_ms", time.Since(startedAt).Milliseconds())
 		return
 	}
 	if grant == nil || grant.Status != accessgrant.StatusActive {
-		if err := s.ActivateInviteUC.Execute(ctx, app.ActivateInviteCodeInput{UserID: userID, Code: code}); err != nil {
-			s.handleInviteError(ctx, chatID, err)
+		if err := s.ActivateInviteUC.Execute(ctx, app.ActivateInviteCodeInput{UserID: userID, Code: code, TelegramUserID: telegramID, TelegramChatID: chatID}); err != nil {
+			s.handleInviteError(chatID, telegramID, userID, code, startedAt, err)
 			return
 		}
 		s.logInfo("telegram.activate_invite.success", "telegram_user_id", telegramID, "chat_id", chatID, "invite_code", code, "user_id", userID)
@@ -495,20 +508,66 @@ func (s *TelegramService) handleInviteCode(ctx context.Context, chatID, telegram
 	s.handleGetConfig(ctx, chatID, userID)
 }
 
-func (s *TelegramService) handleInviteError(ctx context.Context, chatID int64, err error) {
+func (s *TelegramService) handleInviteError(chatID, telegramUserID int64, userID, inviteCode string, startedAt time.Time, err error) {
+	duration := time.Since(startedAt).Milliseconds()
 	switch {
 	case errors.Is(err, app.ErrInvalidInviteCodeFormat):
-		_ = s.Bot.SendMessage(ctx, chatID, "Код должен состоять из 4 цифр.", nil)
+		s.sendErrorReplyMessage(chatID, "Код должен состоять из 4 цифр.", nil, "telegram_user_id", telegramUserID, "user_id", userID, "invite_code", inviteCode, "duration_ms", duration)
 	case errors.Is(err, app.ErrInviteCodeNotUsable):
-		_ = s.Bot.SendMessage(ctx, chatID, "Код неактивен или просрочен.", nil)
+		s.sendErrorReplyMessage(chatID, "Код неактивен или просрочен.", nil, "telegram_user_id", telegramUserID, "user_id", userID, "invite_code", inviteCode, "duration_ms", duration)
 	case errors.Is(err, app.ErrInviteAlreadyUsed):
-		_ = s.Bot.SendMessage(ctx, chatID, "Этот код уже использован вами.", nil)
+		s.sendErrorReplyMessage(chatID, "Этот код уже использован вами.", nil, "telegram_user_id", telegramUserID, "user_id", userID, "invite_code", inviteCode, "duration_ms", duration)
 	case errors.Is(err, app.ErrUserAlreadyHasActiveAccessGrant):
-		_ = s.Bot.SendMessage(ctx, chatID, "У вас уже есть активный доступ.", nil)
+		s.sendErrorReplyMessage(chatID, "У вас уже есть активный доступ.", nil, "telegram_user_id", telegramUserID, "user_id", userID, "invite_code", inviteCode, "duration_ms", duration)
 	default:
 		s.logErr("activate invite", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", nil, "telegram_user_id", telegramUserID, "user_id", userID, "invite_code", inviteCode, "duration_ms", duration)
 	}
+}
+
+func (s *TelegramService) tryLockUser(telegramUserID int64) bool {
+	s.processingMu.Lock()
+	defer s.processingMu.Unlock()
+	if s.processingUsers == nil {
+		s.processingUsers = make(map[int64]struct{})
+	}
+	if _, exists := s.processingUsers[telegramUserID]; exists {
+		return false
+	}
+	s.processingUsers[telegramUserID] = struct{}{}
+	return true
+}
+
+func (s *TelegramService) unlockUser(telegramUserID int64) {
+	s.processingMu.Lock()
+	defer s.processingMu.Unlock()
+	delete(s.processingUsers, telegramUserID)
+}
+
+func userAndChatFromUpdate(upd Update) (telegramUserID, chatID int64, ok bool) {
+	if upd.Message != nil && upd.Message.From.ID != 0 {
+		return upd.Message.From.ID, upd.Message.Chat.ID, true
+	}
+	if upd.CallbackQuery != nil && upd.CallbackQuery.From.ID != 0 {
+		chatID := int64(0)
+		if upd.CallbackQuery.Message != nil {
+			chatID = upd.CallbackQuery.Message.Chat.ID
+		}
+		return upd.CallbackQuery.From.ID, chatID, true
+	}
+	return 0, 0, false
+}
+
+func (s *TelegramService) sendErrorReplyMessage(chatID int64, text string, markup *InlineKeyboardMarkup, fields ...any) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	logFields := append([]any{"chat_id", chatID}, fields...)
+	s.logInfo("telegram.reply.error_send.start", logFields...)
+	if err := s.Bot.SendMessage(ctx, chatID, text, markup); err != nil {
+		s.logInfo("telegram.reply.error_send.error", append(logFields, "error", err)...)
+		return
+	}
+	s.logInfo("telegram.reply.error_send.success", logFields...)
 }
 
 func (s *TelegramService) sendAccessStatus(ctx context.Context, chatID int64, userID string) {
@@ -562,11 +621,11 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 	grant, err := s.GetGrantUC.Execute(ctx, app.GetActiveAccessGrantByUserInput{UserID: userID})
 	if err != nil {
 		if errors.Is(err, accessgrant.ErrNotFound) {
-			_ = s.Bot.SendMessage(ctx, chatID, "Сначала активируйте invite code.", nil)
+			s.sendErrorReplyMessage(chatID, "Сначала активируйте invite code.", nil, "user_id", userID)
 			return
 		}
 		s.logErr("get grant for config", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", nil, "user_id", userID)
 		return
 	}
 	s.logInfo("telegram.config_flow.grant.loaded", "chat_id", chatID, "user_id", userID, "grant_id", grant.ID)
@@ -578,7 +637,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 	d, err := s.Devices.GetActiveByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, device.ErrNotFound) {
 		s.logErr("get active device", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", nil, "user_id", userID)
 		return
 	}
 
@@ -588,7 +647,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		out, err := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
 		if err != nil {
 			s.logErr("create device", err)
-			_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", nil)
+			s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", nil, "user_id", userID)
 			return
 		}
 		deviceID := ""
@@ -608,7 +667,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 	} else {
 		actives, err := s.Accesses.GetActiveByDeviceID(ctx, d.ID)
 		if err != nil || len(actives) == 0 {
-			_ = s.Bot.SendMessage(ctx, chatID, "Нет активного доступа устройства. Удалите устройство и создайте заново.", nil)
+			s.sendErrorReplyMessage(chatID, "Нет активного доступа устройства. Удалите устройство и создайте заново.", nil, "user_id", userID)
 			return
 		}
 		accessID = actives[0].ID
@@ -969,7 +1028,7 @@ func (s *TelegramService) issueDownloadToken(ctx context.Context, accessID strin
 func (s *TelegramService) sendConfigDocument(ctx context.Context, chatID int64, userID string) {
 	accessID, err := s.resolveActiveAccessID(ctx, userID)
 	if err != nil {
-		_ = s.Bot.SendMessage(ctx, chatID, "Нет готового конфига. Нажмите «Получить конфиг».", nil)
+		s.sendErrorReplyMessage(chatID, "Нет готового конфига. Нажмите «Получить конфиг».", nil, "user_id", userID)
 		return
 	}
 	s.sendConfigDocumentByAccessID(ctx, chatID, userID, accessID)
@@ -980,13 +1039,13 @@ func (s *TelegramService) sendConfigDocumentByAccessID(ctx context.Context, chat
 	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
 	if err != nil {
 		s.logErr("load config plaintext", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", nil)
+		s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", nil, "user_id", userID, "access_id", accessID)
 		return
 	}
 
 	if err := s.Bot.SendDocument(ctx, chatID, "rznvpn.conf", []byte(configPlain), "Готово ✅ Конфиг для AmneziaWG/WireGuard", configReadyMenu()); err != nil {
 		s.logErr("telegram send document", err)
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось активировать доступ. Попробуйте позже.", configReadyMenu())
+		s.sendErrorReplyMessage(chatID, "Не удалось активировать доступ. Попробуйте позже.", configReadyMenu(), "user_id", userID, "access_id", accessID)
 		return
 	}
 	s.logInfo("telegram.delivery.document", "chat_id", chatID, "user_id", userID, "access_id", accessID)
