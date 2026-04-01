@@ -76,6 +76,8 @@ services:
       - AMNEZIA_CONFIG_DIR=/etc/amnezia
       - AMNEZIA_KEEP_INTERFACE_UP=1
       - LOG_LEVEL=debug
+    ports:
+      - "${AMNEZIA_PORT:?AMNEZIA_PORT is required}:${AMNEZIA_PORT:?AMNEZIA_PORT is required}/udp"
     volumes:
       - single_amnezia_data:/var/lib/amnezia
       - ./deploy/node/amnezia:/etc/amnezia:rw
@@ -91,6 +93,8 @@ services:
     container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
     restart: unless-stopped
     command: ["xray", "run", "-config", "/etc/xray/config.json"]
+    ports:
+      - "${XRAY_REALITY_PORT:-8443}:${XRAY_REALITY_PORT:-8443}/tcp"
     volumes:
       - ./deploy/node/xray:/etc/xray:rw
       - single_xray_data:/var/lib/xray
