@@ -1247,6 +1247,29 @@ func parseXrayUUID(configPlain string) (string, error) {
 	return strings.TrimSpace(parsed.ID), nil
 }
 
+func parseXrayUUID(configPlain string) (string, error) {
+	type xrayCfg struct {
+		ID string `json:"id"`
+	}
+	trimmed := strings.TrimSpace(configPlain)
+	if strings.HasPrefix(trimmed, "vless://") {
+		raw := strings.TrimPrefix(trimmed, "vless://")
+		parts := strings.SplitN(raw, "@", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+			return "", fmt.Errorf("invalid vless link")
+		}
+		return strings.TrimSpace(parts[0]), nil
+	}
+	var parsed xrayCfg
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(parsed.ID) == "" {
+		return "", fmt.Errorf("xray uuid is empty")
+	}
+	return strings.TrimSpace(parsed.ID), nil
+}
+
 func (s *TelegramService) resolveActiveAccessID(ctx context.Context, userID string) (string, error) {
 	return s.resolveActiveAccessIDByProtocol(ctx, userID, "wireguard")
 }
