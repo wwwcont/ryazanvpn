@@ -178,6 +178,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
+	xrayUserUUID := hashToken(createdXrayAccess.ID)[:32]
 
 	payload, _ := json.Marshal(map[string]any{
 		"device_id":     createdDevice.ID,
@@ -207,7 +208,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	xrayPayload, _ := json.Marshal(map[string]any{
 		"device_id":   createdDevice.ID,
 		"access_id":   createdXrayAccess.ID,
-		"public_key":  publicKey,
+		"public_key":  xrayUserUUID,
 		"assigned_ip": assignedIP,
 		"protocol":    "xray",
 		"keepalive":   0,
@@ -283,6 +284,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			DeviceAccessID:  createdXrayAccess.ID,
 			Protocol:        "xray",
 			DevicePublicKey: publicKey,
+			XrayUserUUID:    xrayUserUUID,
 			EndpointHost:    valueOrDefault(uc.XrayPublicHost, valueOrDefault(uc.EndpointHost, vpnHost)),
 			EndpointPort:    valueOrDefaultInt(uc.XrayRealityPort, valueOrDefaultInt(uc.EndpointPort, vpnPort)),
 			XrayServerName:  uc.XrayRealitySNI,

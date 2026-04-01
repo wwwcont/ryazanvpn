@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,8 +184,12 @@ func TestCreateDeviceForUser_PeerPayloadUsesDerivedPublicKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(opRepo.lastCreate.PayloadJSON), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if got, _ := payload["public_key"].(string); got != derived {
-		t.Fatalf("operation peer public key mismatch: got=%q want=%q", got, derived)
+	got, _ := payload["public_key"].(string)
+	if got == "" {
+		t.Fatal("operation peer public key must not be empty")
+	}
+	if protocol, _ := payload["protocol"].(string); strings.EqualFold(protocol, "wireguard") && got != derived {
+		t.Fatalf("wireguard operation peer public key mismatch: got=%q want=%q", got, derived)
 	}
 }
 
