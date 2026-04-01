@@ -19,7 +19,7 @@ if [[ ! -f deploy/node/xray/config.json ]]; then
 fi
 
 echo "Starting node-agent stack..."
-docker compose --env-file "$TARGET_ENV" -f docker-compose.node.yml up -d --build
+./scripts/compose-with-env.sh "$TARGET_ENV" -f docker-compose.node.yml up -d --build
 
 echo "Node bootstrap completed."
 echo "IMPORTANT: runtime is fully managed by node-agent. Do NOT use desktop Amnezia GUI on this host."

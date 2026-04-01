@@ -4,7 +4,7 @@ MIGRATE ?= migrate
 POSTGRES_URL ?= postgres://vpn:vpn@localhost:5432/vpn?sslmode=disable
 POSTGRES_DSN ?= $(POSTGRES_URL)
 SINGLE_ENV ?= .env.single.generated
-SINGLE_COMPOSE = docker compose --env-file $(SINGLE_ENV) -f docker-compose.single.yml
+SINGLE_COMPOSE = ./scripts/compose-with-env.sh $(SINGLE_ENV) -f docker-compose.single.yml
 
 .PHONY: \
 	single run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
@@ -45,10 +45,10 @@ restart-agent:
 	$(SINGLE_COMPOSE) restart node-agent
 
 run-backend:
-	docker compose --env-file .env.backend.generated -f docker-compose.backend.yml up -d --build
+	./scripts/compose-with-env.sh .env.backend.generated -f docker-compose.backend.yml up -d --build
 
 run-node:
-	docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build
+	./scripts/compose-with-env.sh .env.node.generated -f docker-compose.node.yml up -d --build
 
 test:
 	go test ./...
