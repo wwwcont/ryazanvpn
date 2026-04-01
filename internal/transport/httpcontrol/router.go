@@ -370,12 +370,49 @@ ORDER BY month DESC, tum.protocol`, uid)
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
 				return
 			}
+			nodeName := strings.TrimSpace(req.NodeName)
+			if nodeName == "" {
+				nodeName = "node-" + nodeID
+			}
+			region := strings.TrimSpace(req.Region)
+			if region == "" {
+				region = "single-server"
+			}
+			agentBaseURL := strings.TrimSpace(req.AgentBaseURL)
+			if agentBaseURL == "" {
+				agentBaseURL = "http://node-agent:8081"
+			}
+			publicIP := strings.TrimSpace(req.PublicIP)
+			if publicIP == "" {
+				publicIP = "127.0.0.1"
+			}
+			capacity := req.Capacity
+			if capacity <= 0 {
+				capacity = 40
+			}
 			metadata := map[string]any{"protocols_supported": req.Protocols}
-			if strings.TrimSpace(req.PublicIP) != "" {
-				metadata["public_ip"] = strings.TrimSpace(req.PublicIP)
+			if publicIP != "" {
+				metadata["public_ip"] = publicIP
 			}
 			rawMeta, _ := json.Marshal(metadata)
-			_, err := opts.PG.Exec(r.Context(), `UPDATE vpn_nodes SET name=COALESCE(NULLIF($2,''), name), region=COALESCE(NULLIF($3,''), region), user_capacity=CASE WHEN $4 > 0 THEN $4 ELSE user_capacity END, agent_base_url=$5, runtime_metadata=$6::jsonb, status='active', last_seen_at=NOW(), updated_at=NOW() WHERE id=$1`, nodeID, strings.TrimSpace(req.NodeName), strings.TrimSpace(req.Region), req.Capacity, strings.TrimSpace(req.AgentBaseURL), string(rawMeta))
+			_, err := opts.PG.Exec(r.Context(), `
+INSERT INTO vpn_nodes (
+	id, name, region, status, user_capacity, agent_base_url, vpn_endpoint,
+	vpn_endpoint_host, vpn_endpoint_port, server_public_key, vpn_subnet_cidr,
+	runtime_metadata, last_seen_at, created_at, updated_at
+) VALUES (
+	$1, $2, $3, 'active', $4, $5, $6 || ':41475', $6, 41475,
+	'', '10.8.1.0/24', $7::jsonb, NOW(), NOW(), NOW()
+)
+ON CONFLICT (id) DO UPDATE SET
+	name=COALESCE(NULLIF(EXCLUDED.name,''), vpn_nodes.name),
+	region=COALESCE(NULLIF(EXCLUDED.region,''), vpn_nodes.region),
+	user_capacity=CASE WHEN EXCLUDED.user_capacity > 0 THEN EXCLUDED.user_capacity ELSE vpn_nodes.user_capacity END,
+	agent_base_url=COALESCE(NULLIF(EXCLUDED.agent_base_url,''), vpn_nodes.agent_base_url),
+	runtime_metadata=EXCLUDED.runtime_metadata,
+	status='active',
+	last_seen_at=NOW(),
+	updated_at=NOW()`, nodeID, nodeName, region, capacity, agentBaseURL, publicIP, string(rawMeta))
 			if err != nil {
 				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "register failed"})
 				return
