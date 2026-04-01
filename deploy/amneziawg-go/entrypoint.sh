@@ -7,6 +7,7 @@ CONFIG_PATH="${AMNEZIA_CONFIG_PATH:-}"
 KEEP_UP="${AMNEZIA_KEEP_INTERFACE_UP:-1}"
 SOCK_DIR="/var/run/amneziawg"
 SOCK_PATH="${SOCK_DIR}/${IFACE}.sock"
+EXPECTED_PORT="${AMNEZIA_PORT:-${AMNEZIA_LISTEN_PORT:-}}"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -25,24 +26,6 @@ find_config() {
       return
     fi
   done
-}
-
-create_default_config() {
-  default_conf="$CONF_DIR/$IFACE.conf"
-  if [ -f "$default_conf" ]; then
-    echo "$default_conf"
-    return
-  fi
-
-  mkdir -p "$CONF_DIR"
-  private_key="$(awg genkey)"
-  umask 077
-  cat > "$default_conf" <<EOF
-[Interface]
-PrivateKey = $private_key
-ListenPort = ${AMNEZIA_LISTEN_PORT:-51820}
-EOF
-  echo "$default_conf"
 }
 
 extract_addresses() {
@@ -119,12 +102,16 @@ shutdown() {
 main() {
   conf="$(find_config || true)"
   if [ -z "$conf" ]; then
-    echo "config not found in $CONF_DIR; generating minimal bootstrap config" >&2
-    conf="$(create_default_config)"
+    echo "amnezia.server_config.not_found iface=$IFACE conf_dir=$CONF_DIR" >&2
+    exit 1
   fi
+  echo "amnezia.server_config.loaded path=$conf" >&2
 
   start_runtime
   apply_config "$conf"
+  actual_port="$(awg show "$IFACE" listen-port 2>/dev/null || true)"
+  echo "amnezia.server_listen_port.expected value=${EXPECTED_PORT:-unknown}" >&2
+  echo "amnezia.server_listen_port.actual value=${actual_port:-unknown}" >&2
 
   trap 'shutdown; exit 0' INT TERM
   wait "$RUNTIME_PID"

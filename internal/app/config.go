@@ -43,7 +43,9 @@ type Config struct {
 	RuntimeStatsArgs        []string
 	AmneziaContainerName    string
 	AmneziaInterfaceName    string
+	AmneziaPort             string
 	XrayContainerName       string
+	XrayConfigPath          string
 	XrayPublicHost          string
 	XrayRealityPort         int
 	XrayRealityServerName   string
@@ -125,7 +127,9 @@ func LoadConfig(serviceName string) (Config, error) {
 		RuntimeStatsArgs:        csvListFromEnv("RUNTIME_STATS_ARGS"),
 		AmneziaContainerName:    envOrDefault("AMNEZIA_CONTAINER_NAME", "amnezia-awg2"),
 		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", "awg0"),
+		AmneziaPort:             firstNonEmpty(os.Getenv("AMNEZIA_PORT"), os.Getenv("AMNEZIA_LISTEN_PORT")),
 		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", "ryazanvpn-xray"),
+		XrayConfigPath:          envOrDefault("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
 		XrayPublicHost:          envOrDefault("XRAY_PUBLIC_HOST", ""),
 		XrayRealityPort:         intFromEnv("XRAY_REALITY_PORT", 8443),
 		XrayRealityServerName:   envOrDefault("XRAY_REALITY_SERVER_NAME", "www.cloudflare.com"),
