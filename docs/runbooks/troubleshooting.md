@@ -28,11 +28,18 @@
 ## missing XRAY_CONTAINER_NAME
 
 Симптомы:
-- `node-agent` heartbeat/reconcile видит runtime ошибку `xray container is not configured`.
+- `error while interpolating services.xray.container_name: required variable XRAY_CONTAINER_NAME is missing a value`;
+- при этом переменная есть в `.env.node.generated` / `.env.single.generated`.
+
+Причина:
+- Docker Compose подставляет `${...}` только из текущего окружения, файла `.env` или `--env-file`;
+- `env_file:` внутри сервиса **не** участвует в интерполяции compose.
 
 Что делать:
-1. Обязательно задайте `XRAY_CONTAINER_NAME` в `.env.node.generated` / `.env.single.generated`.
-2. Убедитесь, что значение совпадает с `container_name` сервиса `xray`.
+1. Запускайте compose c env-файлом явно:
+   - `docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build`
+   - `docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build`
+2. Проверьте, что в используемом env-файле есть `XRAY_CONTAINER_NAME=...` без лишних пробелов/кавычек.
 
 ## node-agent cannot exec docker
 
