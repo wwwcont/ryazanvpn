@@ -15,11 +15,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    depends_on:
-      amnezia-awg:
-        condition: service_healthy
-      xray:
-        condition: service_healthy
 
   redis:
     image: redis:8-alpine
@@ -30,11 +25,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    depends_on:
-      amnezia-awg:
-        condition: service_healthy
-      xray:
-        condition: service_healthy
 
   migrate:
     image: migrate/migrate:v4.17.1
@@ -74,59 +64,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      amnezia-awg:
-        condition: service_healthy
-      xray:
-        condition: service_healthy
-
-  amnezia-awg:
-    build:
-      context: .
-      dockerfile: deploy/amneziawg-go/Dockerfile
-    env_file: [ .env.single.generated ]
-    container_name: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    environment:
-      - AMNEZIA_INTERFACE_NAME=${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
-      - AMNEZIA_PORT=${AMNEZIA_PORT:?AMNEZIA_PORT is required}
-      - AMNEZIA_SUBNET=${AMNEZIA_SUBNET:-10.8.1.0/24}
-      - AMNEZIA_CONFIG_DIR=/etc/amnezia
-      - AMNEZIA_KEEP_INTERFACE_UP=1
-      - AMNEZIA_RUNTIME_METADATA_PATH=/etc/amnezia/runtime-metadata.json
-      - AMNEZIA_PUBLIC_KEY_PATH=/etc/amnezia/server.publickey
-      - LOG_LEVEL=debug
-    ports:
-      - "${AMNEZIA_PORT:?AMNEZIA_PORT is required}:${AMNEZIA_PORT:?AMNEZIA_PORT is required}/udp"
-    volumes:
-      - single_amnezia_data:/var/lib/amnezia
-      - ./deploy/node/amnezia:/etc/amnezia:rw
-    healthcheck:
-      test: [ "CMD-SHELL", "awg show ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required} >/dev/null 2>&1 && [ -s /etc/amnezia/server.publickey ] && [ -s /etc/amnezia/runtime-metadata.json ]" ]
-      interval: 20s
-      timeout: 5s
-      retries: 5
-
-  xray:
-    image: teddysun/xray:1.8.24
-    env_file: [.env.single.generated]
-    container_name: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
-    restart: unless-stopped
-    command: ["sh", "-ceu", "/etc/xray/bootstrap.sh && exec xray run -config /etc/xray/config.json"]
-    ports:
-      - "${XRAY_REALITY_PORT:-8443}:${XRAY_REALITY_PORT:-8443}/tcp"
-    volumes:
-      - ./deploy/node/xray:/etc/xray:rw
-      - single_xray_data:/var/lib/xray
-      - single_xray_logs:/var/log/xray
-    healthcheck:
-      test: ["CMD-SHELL", "xray run -test -config /etc/xray/config.json >/dev/null 2>&1 && [ -s /etc/xray/reality.publickey ] && [ -s /etc/xray/runtime-metadata.json ]"]
-      interval: 20s
-      timeout: 5s
-      retries: 5
 
   node-agent:
     build:
@@ -142,14 +79,9 @@ services:
       RUNTIME_ADAPTER: ${RUNTIME_ADAPTER:-amnezia_docker}
       AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
       AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
-      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:-ryazanvpn-xray}
+      XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
     ports:
       - "8081:8081"
-    depends_on:
-      amnezia-awg:
-        condition: service_healthy
-      xray:
-        condition: service_started
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./deploy/node/amnezia:/etc/amnezia:ro
@@ -157,6 +89,3 @@ services:
 
 volumes:
   postgres_data:
-  single_amnezia_data:
-  single_xray_data:
-  single_xray_logs:
