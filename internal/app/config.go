@@ -376,11 +376,21 @@ func (c *Config) applyRuntimeOverrides() {
 	}
 
 	if m, ok := readXrayRuntimeMetadata(c.XrayRuntimeMetadataPath); ok {
-		c.XrayRealityPort = intFromAnyOrFallback(m.ListenPort, c.XrayRealityPort)
-		c.XrayRealityServerName = firstNonEmpty(m.ServerName, c.XrayRealityServerName)
-		c.XrayRealityShortID = firstNonEmpty(m.ShortID, c.XrayRealityShortID)
-		c.XrayPublicHost = firstNonEmpty(m.PublicHost, c.XrayPublicHost)
-		c.XrayRealityPublicKey = firstNonEmpty(m.RealityPublicKey, c.XrayRealityPublicKey)
+		if _, exists := os.LookupEnv("XRAY_REALITY_PORT"); !exists {
+			c.XrayRealityPort = intFromAnyOrFallback(m.ListenPort, c.XrayRealityPort)
+		}
+		if _, exists := os.LookupEnv("XRAY_REALITY_SERVER_NAME"); !exists {
+			c.XrayRealityServerName = firstNonEmpty(m.ServerName, c.XrayRealityServerName)
+		}
+		if _, exists := os.LookupEnv("XRAY_REALITY_SHORT_ID"); !exists {
+			c.XrayRealityShortID = firstNonEmpty(m.ShortID, c.XrayRealityShortID)
+		}
+		if _, exists := os.LookupEnv("XRAY_PUBLIC_HOST"); !exists {
+			c.XrayPublicHost = firstNonEmpty(m.PublicHost, c.XrayPublicHost)
+		}
+		if _, exists := os.LookupEnv("XRAY_REALITY_PUBLIC_KEY"); !exists {
+			c.XrayRealityPublicKey = firstNonEmpty(m.RealityPublicKey, c.XrayRealityPublicKey)
+		}
 	}
 
 	for _, filePath := range []string{c.VPNServerPublicKeyFile, c.XrayRealityPublicKeyFile} {
