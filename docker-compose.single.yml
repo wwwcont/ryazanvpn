@@ -49,8 +49,6 @@ services:
       CONTROL_PLANE_HTTP_ADDR: ${CONTROL_PLANE_HTTP_ADDR:-:8080}
       CONFIG_MASTER_KEY: ${CONFIG_MASTER_KEY:?CONFIG_MASTER_KEY is required}
       VPN_SERVER_PUBLIC_KEY_FILE: /etc/amnezia/server.publickey
-      AMNEZIA_RUNTIME_METADATA_PATH: /etc/amnezia/runtime-metadata.json
-      XRAY_RUNTIME_METADATA_PATH: /etc/xray/runtime-metadata.json
       XRAY_REALITY_PUBLIC_KEY_FILE: /etc/xray/reality.publickey
     ports:
       - "8080:8080"
