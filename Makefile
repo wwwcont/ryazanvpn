@@ -47,16 +47,16 @@ restart-agent:
 	$(SINGLE_COMPOSE) restart node-agent
 
 single-vpn-up:
-	$(SINGLE_COMPOSE) up -d --build amnezia-awg xray
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
 
 single-runtime-sync:
-	./scripts/single-runtime-sync.sh $(SINGLE_ENV)
+	./scripts/runtime-sync-env.sh $(SINGLE_ENV)
 
 single-control-up:
-	$(SINGLE_COMPOSE) up -d --build postgres redis migrate control-plane
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh control-up
 
 single-node-up:
-	$(SINGLE_COMPOSE) up -d --build node-agent
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh node-up
 
 topology-runtime-up:
 	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh runtime-up

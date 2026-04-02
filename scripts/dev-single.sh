@@ -27,16 +27,16 @@ case "$cmd" in
     "${COMPOSE[@]}" up -d --build
     ;;
   vpn-up)
-    "${COMPOSE[@]}" up -d --build amnezia-awg xray
+    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
     ;;
   sync)
     ./scripts/runtime-sync-env.sh "$ENV_FILE"
     ;;
   core-up)
-    "${COMPOSE[@]}" up -d --build postgres redis migrate control-plane
+    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh control-up
     ;;
   node-up)
-    "${COMPOSE[@]}" up -d --build node-agent
+    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh node-up
     ;;
   down)
     "${COMPOSE[@]}" down

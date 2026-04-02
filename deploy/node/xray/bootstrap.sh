@@ -42,34 +42,27 @@ derive_public_from_private() {
 
 read_json_field() {
   field="$1"
-  python3 - "$CONFIG_PATH" "$field" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-cfg_path = Path(sys.argv[1])
-field = sys.argv[2]
-try:
-    data = json.loads(cfg_path.read_text(encoding="utf-8"))
-    inbound = (data.get("inbounds") or [])[0]
-    rs = (((inbound.get("streamSettings") or {}).get("realitySettings") or {}))
-except Exception:
-    print("")
-    raise SystemExit(0)
-
-if field == "privateKey":
-    print(str(rs.get("privateKey", "")))
-elif field == "shortId":
-    ids = rs.get("shortIds") or []
-    print(str(ids[0] if ids else ""))
-elif field == "serverName":
-    names = rs.get("serverNames") or []
-    print(str(names[0] if names else ""))
-elif field == "port":
-    print(str(inbound.get("port", "")))
-elif field == "dest":
-    print(str(rs.get("dest", "")))
-PY
+  compact="$(tr -d '\n\r' < "$CONFIG_PATH" 2>/dev/null || true)"
+  case "$field" in
+    privateKey)
+      printf '%s' "$compact" | sed -n 's/.*"privateKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+      ;;
+    shortId)
+      printf '%s' "$compact" | sed -n 's/.*"shortIds"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p'
+      ;;
+    serverName)
+      printf '%s' "$compact" | sed -n 's/.*"serverNames"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p'
+      ;;
+    port)
+      printf '%s' "$compact" | sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+      ;;
+    dest)
+      printf '%s' "$compact" | sed -n 's/.*"dest"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
 }
 
 write_metadata() {

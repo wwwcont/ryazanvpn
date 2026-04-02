@@ -367,7 +367,19 @@ start_runtime() {
 
 apply_config() {
   conf="$1"
-  /usr/local/bin/awg setconf "$IFACE" "$conf"
+  setconf_tmp="$(mktemp)"
+  awk '
+    {
+      line = $0
+      sub(/[[:space:]]*[#;].*$/, "", line)
+      if (line ~ /^[[:space:]]*Address[[:space:]]*=/) {
+        next
+      }
+      print $0
+    }
+  ' "$conf" > "$setconf_tmp"
+  /usr/local/bin/awg setconf "$IFACE" "$setconf_tmp"
+  rm -f "$setconf_tmp"
 
   extract_addresses "$conf" | while IFS= read -r addr; do
     [ -n "$addr" ] || continue
