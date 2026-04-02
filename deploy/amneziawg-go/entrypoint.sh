@@ -12,6 +12,7 @@ DEFAULT_SUBNET="${AMNEZIA_SUBNET:-10.8.1.0/24}"
 NAT_ENABLED="${AMNEZIA_NAT_ENABLED:-1}"
 EGRESS_IFACE="${AMNEZIA_EGRESS_IFACE:-}"
 PUBLIC_KEY_PATH="${AMNEZIA_PUBLIC_KEY_PATH:-/etc/amnezia/server.publickey}"
+METADATA_PATH="${AMNEZIA_RUNTIME_METADATA_PATH:-/etc/amnezia/runtime-metadata.json}"
 
 find_config() {
   if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
@@ -67,6 +68,13 @@ create_config_from_env() {
     if [ -n "$iface_addr" ]; then
       echo "Address = $iface_addr"
     fi
+    for field in Jc Jmin Jmax S1 S2 S3 S4 H1 H2 H3 H4 I1 I2 I3 I4 I5; do
+      env_name="AMNEZIA_${field}"
+      eval "value=\${$env_name:-}"
+      if [ -n "$value" ]; then
+        echo "${field} = ${value}"
+      fi
+    done
   } > "$conf"
   echo "$conf"
 }
@@ -110,6 +118,46 @@ ensure_listen_port() {
     }
   ' "$conf" > "$tmp"
   mv "$tmp" "$conf"
+}
+
+ensure_interface_address() {
+  conf="$1"
+  expected_address="$(derive_interface_address)"
+  [ -n "$expected_address" ] || return 0
+  existing="$(extract_addresses "$conf" | head -n 1 || true)"
+  if [ -n "$existing" ]; then
+    return 0
+  fi
+  tmp="${conf}.tmp.$$"
+  awk -v expected="$expected_address" '
+    BEGIN { in_interface = 0; inserted = 0 }
+    /^[[:space:]]*\[Interface\][[:space:]]*$/ {
+      if (in_interface && inserted == 0) {
+        print "Address = " expected
+        inserted = 1
+      }
+      in_interface = 1
+      print
+      next
+    }
+    /^[[:space:]]*\[/ {
+      if (in_interface && inserted == 0) {
+        print "Address = " expected
+        inserted = 1
+      }
+      in_interface = 0
+      print
+      next
+    }
+    { print }
+    END {
+      if (in_interface && inserted == 0) {
+        print "Address = " expected
+      }
+    }
+  ' "$conf" > "$tmp"
+  mv "$tmp" "$conf"
+  echo "amnezia.server_config.address.inserted path=$conf address=$expected_address" >&2
 }
 
 extract_interface_private_key() {
@@ -206,6 +254,70 @@ ensure_server_public_key() {
   fi
 }
 
+extract_interface_field() {
+  conf="$1"
+  field="$2"
+  awk -v expected="$field" '
+    BEGIN { in_interface = 0 }
+    /^[[:space:]]*\[Interface\][[:space:]]*$/ { in_interface = 1; next }
+    /^[[:space:]]*\[/ { in_interface = 0; next }
+    in_interface {
+      line = $0
+      sub(/[[:space:]]*[#;].*$/, "", line)
+      if (line ~ "^[[:space:]]*" expected "[[:space:]]*=") {
+        split(line, kv, "=")
+        value = kv[2]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        if (value != "") {
+          print value
+          exit 0
+        }
+      }
+    }
+  ' "$conf"
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_runtime_metadata() {
+  conf="$1"
+  public_key="$(read_public_key_file || true)"
+  listen_port="$(extract_interface_field "$conf" "ListenPort")"
+  server_address="$(extract_addresses "$conf" | head -n 1 || true)"
+  mkdir -p "$(dirname "$METADATA_PATH")"
+  umask 077
+  cat > "$METADATA_PATH" <<EOF
+{
+  "interface": "$(json_escape "$IFACE")",
+  "config_path": "$(json_escape "$conf")",
+  "public_key_path": "$(json_escape "$PUBLIC_KEY_PATH")",
+  "server_public_key": "$(json_escape "$public_key")",
+  "listen_port": ${listen_port:-0},
+  "subnet": "$(json_escape "$DEFAULT_SUBNET")",
+  "server_address": "$(json_escape "$server_address")",
+  "jc": "$(json_escape "$(extract_interface_field "$conf" "Jc")")",
+  "jmin": "$(json_escape "$(extract_interface_field "$conf" "Jmin")")",
+  "jmax": "$(json_escape "$(extract_interface_field "$conf" "Jmax")")",
+  "s1": "$(json_escape "$(extract_interface_field "$conf" "S1")")",
+  "s2": "$(json_escape "$(extract_interface_field "$conf" "S2")")",
+  "s3": "$(json_escape "$(extract_interface_field "$conf" "S3")")",
+  "s4": "$(json_escape "$(extract_interface_field "$conf" "S4")")",
+  "h1": "$(json_escape "$(extract_interface_field "$conf" "H1")")",
+  "h2": "$(json_escape "$(extract_interface_field "$conf" "H2")")",
+  "h3": "$(json_escape "$(extract_interface_field "$conf" "H3")")",
+  "h4": "$(json_escape "$(extract_interface_field "$conf" "H4")")",
+  "i1": "$(json_escape "$(extract_interface_field "$conf" "I1")")",
+  "i2": "$(json_escape "$(extract_interface_field "$conf" "I2")")",
+  "i3": "$(json_escape "$(extract_interface_field "$conf" "I3")")",
+  "i4": "$(json_escape "$(extract_interface_field "$conf" "I4")")",
+  "i5": "$(json_escape "$(extract_interface_field "$conf" "I5")")"
+}
+EOF
+  echo "amnezia.runtime_metadata.ready path=$METADATA_PATH" >&2
+}
+
 extract_addresses() {
   conf="$1"
   awk '
@@ -255,7 +367,19 @@ start_runtime() {
 
 apply_config() {
   conf="$1"
-  /usr/local/bin/awg setconf "$IFACE" "$conf"
+  setconf_tmp="$(mktemp)"
+  awk '
+    {
+      line = $0
+      sub(/[[:space:]]*[#;].*$/, "", line)
+      if (line ~ /^[[:space:]]*Address[[:space:]]*=/) {
+        next
+      }
+      print $0
+    }
+  ' "$conf" > "$setconf_tmp"
+  /usr/local/bin/awg setconf "$IFACE" "$setconf_tmp"
+  rm -f "$setconf_tmp"
 
   extract_addresses "$conf" | while IFS= read -r addr; do
     [ -n "$addr" ] || continue
@@ -330,8 +454,12 @@ main() {
     config_mode="generated"
   fi
   ensure_listen_port "$conf"
+  ensure_interface_address "$conf"
   echo "amnezia.server_config.selected path=$conf" >&2
   ensure_server_public_key "$conf" "$config_mode"
+  if ! write_runtime_metadata "$conf"; then
+    echo "amnezia.runtime_metadata.warning reason=write_failed path=$METADATA_PATH config=$conf" >&2
+  fi
 
   start_runtime
   apply_config "$conf"

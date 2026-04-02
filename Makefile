@@ -8,6 +8,8 @@ SINGLE_COMPOSE = ./scripts/compose-with-env.sh $(SINGLE_ENV) -f docker-compose.s
 
 .PHONY: \
 	single run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
+	single-vpn-up single-runtime-sync single-control-up single-node-up \
+	topology-runtime-up topology-sync-env topology-control-up topology-node-up topology-ps topology-down \
 	run-backend run-node \
 	test lint migrate-up migrate-down
 
@@ -43,6 +45,36 @@ restart-control:
 
 restart-agent:
 	$(SINGLE_COMPOSE) restart node-agent
+
+single-vpn-up:
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
+
+single-runtime-sync:
+	./scripts/runtime-sync-env.sh $(SINGLE_ENV)
+
+single-control-up:
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh control-up
+
+single-node-up:
+	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh node-up
+
+topology-runtime-up:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh runtime-up
+
+topology-sync-env:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh sync-env
+
+topology-control-up:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh control-up
+
+topology-node-up:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh node-up
+
+topology-ps:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh ps
+
+topology-down:
+	ENV_FILE=$(SINGLE_ENV) ./scripts/topology-flow.sh down
 
 run-backend:
 	./scripts/compose-with-env.sh .env.backend.generated -f docker-compose.backend.yml up -d --build

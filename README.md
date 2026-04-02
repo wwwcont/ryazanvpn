@@ -152,7 +152,79 @@ Important:
 - do not use desktop Amnezia GUI on server hosts;
 - no manual peer/client edits in runtime containers.
 
-## Быстрый деплой: все сервисы на одной ноде
+## Пошаговый single-host flow (VPN -> sync env -> control-plane -> node-agent)
+
+Если хотите уйти от one-shot single режима, используйте 4 шага (один общий env в корне, например `.env.single.generated`):
+
+```bash
+cp deploy/env/single-server.env.example .env.single.generated
+# заполните секреты только один раз
+
+# 1) Поднять только runtime VPN контейнеры
+make single-vpn-up
+
+# 2) Считать runtime артефакты и синхронизировать ключи/порты в .env.single.generated
+make single-runtime-sync
+
+# 3) Поднять core сервис управления
+make single-control-up
+
+# 4) Поднять node-agent
+make single-node-up
+```
+
+То же самое через скрипт:
+
+```bash
+scripts/dev-single.sh vpn-up
+scripts/dev-single.sh sync
+scripts/dev-single.sh core-up
+scripts/dev-single.sh node-up
+```
+
+Для node-agent на той же машине используйте внутренний адрес control-plane:
+
+```env
+CONTROL_PLANE_BASE_URL=http://control-plane:8080
+```
+
+## Unified topology flow (single + distributed)
+
+Теперь есть единый оркестрационный сценарий `scripts/topology-flow.sh`, где отличаются только:
+- `TOPOLOGY_MODE` (`single-node`, `control-plane-only`, `node-only`, `distributed`);
+- `INSTALL_ROLE` (для `distributed`: `control-plane`, `node`, `all`);
+- адреса между `node-agent` и `control-plane` (`CONTROL_PLANE_BASE_URL`).
+
+Фазы запуска одинаковые:
+1. `runtime-up` — VPN runtime layer (`amnezia-awg`, `xray`);
+2. `sync-env` — синхронизация env из runtime metadata/keys;
+3. `control-up` — control-plane layer (`postgres`, `redis`, `migrate`, `control-plane`);
+4. `node-up` — node layer (`node-agent`).
+
+Пример single-node:
+
+```bash
+ENV_FILE=.env.single.generated TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
+ENV_FILE=.env.single.generated TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh sync-env
+ENV_FILE=.env.single.generated TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh control-up
+ENV_FILE=.env.single.generated TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh node-up
+```
+
+Пример distributed (сервер A, control-plane-only):
+
+```bash
+ENV_FILE=.env.control.generated TOPOLOGY_MODE=control-plane-only ./scripts/topology-flow.sh control-up
+```
+
+Пример distributed (сервер B, node-only):
+
+```bash
+ENV_FILE=.env.node.generated TOPOLOGY_MODE=node-only ./scripts/topology-flow.sh runtime-up
+ENV_FILE=.env.node.generated TOPOLOGY_MODE=node-only ./scripts/topology-flow.sh sync-env
+ENV_FILE=.env.node.generated TOPOLOGY_MODE=node-only ./scripts/topology-flow.sh node-up
+```
+
+## Быстрый деплой: все сервисы на одной ноде (one-shot)
 
 ```bash
 cp deploy/env/single-server.env.example .env.single.generated
