@@ -8,7 +8,7 @@ SINGLE_COMPOSE = ./scripts/compose-with-env.sh $(SINGLE_ENV) -f docker-compose.s
 
 .PHONY: \
 	single run-single up-single down-single rebuild-single logs-single logs-control logs-agent ps-single restart-control restart-agent \
-	single-vpn-up single-runtime-sync single-control-up single-node-up \
+	single-runtime-sync single-control-up single-node-up \
 	topology-runtime-up topology-sync-env topology-control-up topology-node-up topology-ps topology-down \
 	run-backend run-node \
 	test lint migrate-up migrate-down
@@ -45,9 +45,6 @@ restart-control:
 
 restart-agent:
 	$(SINGLE_COMPOSE) restart node-agent
-
-single-vpn-up:
-	ENV_FILE=$(SINGLE_ENV) TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
 
 single-runtime-sync:
 	./scripts/runtime-sync-env.sh $(SINGLE_ENV)

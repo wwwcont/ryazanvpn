@@ -10,8 +10,7 @@ Usage: $0 <command>
 
 Commands:
   up       Start single-server stack in detached mode
-  vpn-up   Start only VPN runtime containers (amnezia-awg, xray)
-  sync     Sync runtime-generated VPN/Xray values back into env file
+  sync     Sync runtime VPN/Xray values from external containers into env file
   core-up  Start control-plane core (postgres, redis, migrate, control-plane)
   node-up  Start node-agent after control-plane is ready
   down     Stop single-server stack
@@ -25,9 +24,6 @@ cmd="${1:-}"
 case "$cmd" in
   up)
     "${COMPOSE[@]}" up -d --build
-    ;;
-  vpn-up)
-    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh runtime-up
     ;;
   sync)
     ./scripts/runtime-sync-env.sh "$ENV_FILE"
