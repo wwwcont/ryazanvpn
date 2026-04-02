@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,10 +44,8 @@ type Config struct {
 	AmneziaContainerName       string
 	AmneziaInterfaceName       string
 	AmneziaPort                string
-	AmneziaRuntimeMetadataPath string
 	XrayContainerName          string
 	XrayConfigPath             string
-	XrayRuntimeMetadataPath    string
 	XrayRealityPublicKeyFile   string
 	XrayPublicHost             string
 	XrayRealityPort            int
@@ -131,16 +128,11 @@ func LoadConfig(serviceName string) (Config, error) {
 		RuntimeExecTimeout:      durationFromEnv("RUNTIME_EXEC_TIMEOUT", 10*time.Second),
 		RuntimeStatsBinaryPath:  os.Getenv("RUNTIME_STATS_BINARY_PATH"),
 		RuntimeStatsArgs:        csvListFromEnv("RUNTIME_STATS_ARGS"),
-		AmneziaContainerName:    envOrDefault("AMNEZIA_CONTAINER_NAME", "amnezia-awg2"),
-		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", "awg0"),
+		AmneziaContainerName:    envOrDefault("AMNEZIA_CONTAINER_NAME", ""),
+		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", ""),
 		AmneziaPort:             firstNonEmpty(os.Getenv("AMNEZIA_PORT"), os.Getenv("AMNEZIA_LISTEN_PORT")),
-		AmneziaRuntimeMetadataPath: envOrDefault(
-			"AMNEZIA_RUNTIME_METADATA_PATH",
-			"/etc/amnezia/runtime-metadata.json",
-		),
-		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", "ryazanvpn-xray"),
+		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", ""),
 		XrayConfigPath:          envOrDefault("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
-		XrayRuntimeMetadataPath: envOrDefault("XRAY_RUNTIME_METADATA_PATH", "/etc/xray/runtime-metadata.json"),
 		XrayRealityPublicKeyFile: envOrDefault(
 			"XRAY_REALITY_PUBLIC_KEY_FILE",
 			"/etc/xray/reality.publickey",
@@ -150,7 +142,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		XrayRealityServerName:   envOrDefault("XRAY_REALITY_SERVER_NAME", "www.cloudflare.com"),
 		XrayRealityShortID:      envOrDefault("XRAY_REALITY_SHORT_ID", "0123456789abcdef"),
 		XrayRealityPublicKey:    envOrDefault("XRAY_REALITY_PUBLIC_KEY", ""),
-		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "/usr/bin/docker"),
+		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "docker"),
 		VPNSubnetCIDR:           envOrDefault("VPN_SUBNET_CIDR", "10.8.1.0/24"),
 		VPNServerPublicEndpoint: envOrDefault("VPN_SERVER_PUBLIC_ENDPOINT", ""),
 		VPNServerPublicKey:      envOrDefault("VPN_SERVER_PUBLIC_KEY", ""),
@@ -192,7 +184,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 800)),
 	}
 
-	cfg.applyRuntimeOverrides()
+	cfg.applyKeyFileOverrides()
 
 	if cfg.HTTPAddr == "" {
 		return Config{}, errors.New("HTTP_ADDR must not be empty")
@@ -315,86 +307,9 @@ func csvListFromEnvOrDefault(key string, fallback []string) []string {
 	return values
 }
 
-type amneziaRuntimeMetadata struct {
-	ServerPublicKey string `json:"server_public_key"`
-	ListenPort      any    `json:"listen_port"`
-	Subnet          string `json:"subnet"`
-	ServerAddress   string `json:"server_address"`
-	Jc              any    `json:"jc"`
-	Jmin            any    `json:"jmin"`
-	Jmax            any    `json:"jmax"`
-	S1              any    `json:"s1"`
-	S2              any    `json:"s2"`
-	S3              any    `json:"s3"`
-	S4              any    `json:"s4"`
-	H1              string `json:"h1"`
-	H2              string `json:"h2"`
-	H3              string `json:"h3"`
-	H4              string `json:"h4"`
-	I1              string `json:"i1"`
-	I2              string `json:"i2"`
-	I3              string `json:"i3"`
-	I4              string `json:"i4"`
-	I5              string `json:"i5"`
-}
-
-type xrayRuntimeMetadata struct {
-	ListenPort       any    `json:"listen_port"`
-	ServerName       string `json:"server_name"`
-	ShortID          string `json:"short_id"`
-	PublicHost       string `json:"public_host"`
-	RealityPublicKey string `json:"reality_public_key"`
-}
-
-func (c *Config) applyRuntimeOverrides() {
-	if m, ok := readAmneziaRuntimeMetadata(c.AmneziaRuntimeMetadataPath); ok {
-		if v := strings.TrimSpace(m.ServerPublicKey); v != "" {
-			c.VPNServerPublicKey = v
-		}
-		if v := stringFromAny(m.ListenPort); v != "" {
-			c.AmneziaPort = v
-		}
-		if v := strings.TrimSpace(m.Subnet); v != "" {
-			c.VPNSubnetCIDR = v
-		}
-		c.VPNAWGJc = intFromAnyOrFallback(m.Jc, c.VPNAWGJc)
-		c.VPNAWGJmin = intFromAnyOrFallback(m.Jmin, c.VPNAWGJmin)
-		c.VPNAWGJmax = intFromAnyOrFallback(m.Jmax, c.VPNAWGJmax)
-		c.VPNAWGS1 = intFromAnyOrFallback(m.S1, c.VPNAWGS1)
-		c.VPNAWGS2 = intFromAnyOrFallback(m.S2, c.VPNAWGS2)
-		c.VPNAWGS3 = intFromAnyOrFallback(m.S3, c.VPNAWGS3)
-		c.VPNAWGS4 = intFromAnyOrFallback(m.S4, c.VPNAWGS4)
-		c.VPNAWGH1 = firstNonEmpty(m.H1, c.VPNAWGH1)
-		c.VPNAWGH2 = firstNonEmpty(m.H2, c.VPNAWGH2)
-		c.VPNAWGH3 = firstNonEmpty(m.H3, c.VPNAWGH3)
-		c.VPNAWGH4 = firstNonEmpty(m.H4, c.VPNAWGH4)
-		c.VPNAWGI1 = firstNonEmpty(m.I1, c.VPNAWGI1)
-		c.VPNAWGI2 = firstNonEmpty(m.I2, c.VPNAWGI2)
-		c.VPNAWGI3 = firstNonEmpty(m.I3, c.VPNAWGI3)
-		c.VPNAWGI4 = firstNonEmpty(m.I4, c.VPNAWGI4)
-		c.VPNAWGI5 = firstNonEmpty(m.I5, c.VPNAWGI5)
-	}
-
-	if m, ok := readXrayRuntimeMetadata(c.XrayRuntimeMetadataPath); ok {
-		if _, exists := os.LookupEnv("XRAY_REALITY_PORT"); !exists {
-			c.XrayRealityPort = intFromAnyOrFallback(m.ListenPort, c.XrayRealityPort)
-		}
-		if _, exists := os.LookupEnv("XRAY_REALITY_SERVER_NAME"); !exists {
-			c.XrayRealityServerName = firstNonEmpty(m.ServerName, c.XrayRealityServerName)
-		}
-		if _, exists := os.LookupEnv("XRAY_REALITY_SHORT_ID"); !exists {
-			c.XrayRealityShortID = firstNonEmpty(m.ShortID, c.XrayRealityShortID)
-		}
-		if _, exists := os.LookupEnv("XRAY_PUBLIC_HOST"); !exists {
-			c.XrayPublicHost = firstNonEmpty(m.PublicHost, c.XrayPublicHost)
-		}
-		if _, exists := os.LookupEnv("XRAY_REALITY_PUBLIC_KEY"); !exists {
-			c.XrayRealityPublicKey = firstNonEmpty(m.RealityPublicKey, c.XrayRealityPublicKey)
-		}
-	}
-
+func (c *Config) applyKeyFileOverrides() {
 	for _, filePath := range []string{c.VPNServerPublicKeyFile, c.XrayRealityPublicKeyFile} {
-		if filePath == "" {
+		if strings.TrimSpace(filePath) == "" {
 			continue
 		}
 		key := readTrimmedFile(filePath)
@@ -411,74 +326,12 @@ func (c *Config) applyRuntimeOverrides() {
 	}
 }
 
-func readAmneziaRuntimeMetadata(path string) (amneziaRuntimeMetadata, bool) {
-	if strings.TrimSpace(path) == "" {
-		return amneziaRuntimeMetadata{}, false
-	}
-	var m amneziaRuntimeMetadata
-	if !readJSONFile(path, &m) {
-		return amneziaRuntimeMetadata{}, false
-	}
-	return m, true
-}
-
-func readXrayRuntimeMetadata(path string) (xrayRuntimeMetadata, bool) {
-	if strings.TrimSpace(path) == "" {
-		return xrayRuntimeMetadata{}, false
-	}
-	var m xrayRuntimeMetadata
-	if !readJSONFile(path, &m) {
-		return xrayRuntimeMetadata{}, false
-	}
-	return m, true
-}
-
-func readJSONFile(path string, out any) bool {
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) == 0 {
-		return false
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return false
-	}
-	return true
-}
-
 func readTrimmedFile(path string) string {
 	data, err := os.ReadFile(strings.TrimSpace(path))
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
-}
-
-func stringFromAny(v any) string {
-	switch t := v.(type) {
-	case string:
-		return strings.TrimSpace(t)
-	case float64:
-		return strconv.Itoa(int(t))
-	case int:
-		return strconv.Itoa(t)
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case json.Number:
-		return t.String()
-	default:
-		return ""
-	}
-}
-
-func intFromAnyOrFallback(v any, fallback int) int {
-	s := stringFromAny(v)
-	if s == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return fallback
-	}
-	return n
 }
 
 func (c Config) String() string {

@@ -9,13 +9,11 @@ usage() {
 Usage: $0 <command>
 
 Commands:
-  up       Start single-server stack in detached mode
-  sync     Sync runtime VPN/Xray values from external containers into env file
-  core-up  Start control-plane core (postgres, redis, migrate, control-plane)
-  node-up  Start node-agent after control-plane is ready
-  down     Stop single-server stack
-  rebuild  Rebuild and restart stack in detached mode
-  logs     Follow logs for whole stack (manual)
+  up       Sync runtime values from configs and start app stack
+  rebuild  Sync runtime values and rebuild/restart app stack
+  sync     Only sync runtime values from config paths in env
+  down     Stop app stack
+  logs     Follow logs for whole stack
   ps       Show container status
 USAGE
 }
@@ -23,22 +21,18 @@ USAGE
 cmd="${1:-}"
 case "$cmd" in
   up)
+    ./scripts/sync-runtime-from-configs.sh "$ENV_FILE"
     "${COMPOSE[@]}" up -d --build
     ;;
+  rebuild)
+    ./scripts/sync-runtime-from-configs.sh "$ENV_FILE"
+    "${COMPOSE[@]}" up -d --build --force-recreate
+    ;;
   sync)
-    ./scripts/runtime-sync-env.sh "$ENV_FILE"
-    ;;
-  core-up)
-    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh control-up
-    ;;
-  node-up)
-    ENV_FILE="$ENV_FILE" TOPOLOGY_MODE=single-node ./scripts/topology-flow.sh node-up
+    ./scripts/sync-runtime-from-configs.sh "$ENV_FILE"
     ;;
   down)
     "${COMPOSE[@]}" down
-    ;;
-  rebuild)
-    "${COMPOSE[@]}" up -d --build --force-recreate
     ;;
   logs)
     "${COMPOSE[@]}" logs -f
