@@ -1,11 +1,6 @@
 {
-  "log": {
-    "loglevel": "warning"
-  },
   "inbounds": [
     {
-      "tag": "vless-reality",
-      "listen": "0.0.0.0",
       "port": 8443,
       "protocol": "vless",
       "settings": {
@@ -14,26 +9,26 @@
       },
       "streamSettings": {
         "network": "tcp",
-        "security": "reality",
         "realitySettings": {
-          "show": false,
-          "dest": "www.cloudflare.com:443",
-          "xver": 0,
+          "dest": "www.googletagmanager.com:443",
+          "privateKey": "AC2oOF_Pay6O9RyPwOH1UPorc5Uylf0aLB9Jh7wBmXE",
           "serverNames": [
-            "www.cloudflare.com"
+            "www.googletagmanager.com"
           ],
-          "privateKey": "oKerobEXWRrwGYbtRcGbbD_YoiQzcSCbZ7Lu3kmonmg",
           "shortIds": [
-            "0123456789abcdef"
+            "8f362bb9c7de86b5"
           ]
-        }
+        },
+        "security": "reality"
       }
     }
   ],
+  "log": {
+    "loglevel": "error"
+  },
   "outbounds": [
     {
-      "protocol": "freedom",
-      "tag": "direct"
+      "protocol": "freedom"
     }
   ]
 }
