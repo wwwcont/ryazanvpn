@@ -476,13 +476,16 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 				break
 			}
 		}
-		if !exists {
-			clients = append(clients, map[string]any{"id": uuid})
-			settings["clients"] = clients
-			inbounds[i] = inbound
-			updated = true
+			if !exists {
+				clients = append(clients, map[string]any{
+					"id":   uuid,
+					"flow": detectXrayClientFlow(clients),
+				})
+				settings["clients"] = clients
+				inbounds[i] = inbound
+				updated = true
+			}
 		}
-	}
 	cfg["inbounds"] = inbounds
 	if !updated {
 		r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
@@ -538,6 +541,20 @@ func normalizeXrayUUID(raw string) (string, error) {
 		return "", fmt.Errorf("xray client id must be a canonical UUID, got %q", raw)
 	}
 	return strings.ToLower(uuid), nil
+}
+
+func detectXrayClientFlow(clients []any) string {
+	for _, rawClient := range clients {
+		client, ok := rawClient.(map[string]any)
+		if !ok {
+			continue
+		}
+		flow := strings.TrimSpace(asString(client["flow"]))
+		if flow != "" {
+			return flow
+		}
+	}
+	return "xtls-rprx-vision"
 }
 
 func validateXrayConfig(cfg map[string]any) error {

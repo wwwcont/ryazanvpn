@@ -162,6 +162,9 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	if !strings.Contains(text, `"id": "11111111-1111-1111-1111-111111111111"`) {
 		t.Fatalf("expected xray client id to be added, got: %s", text)
 	}
+	if !strings.Contains(text, `"flow": "xtls-rprx-vision"`) {
+		t.Fatalf("expected xray client flow to be set, got: %s", text)
+	}
 }
 
 func TestAmneziaDockerRuntime_ApplyPeerXrayRejectsInvalidUUIDBeforeWrite(t *testing.T) {
