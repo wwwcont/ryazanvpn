@@ -38,6 +38,41 @@ func TestTrafficCollectorWorker_CollectsDeltaAndHandlesReset(t *testing.T) {
 	}
 }
 
+func TestTrafficCollectorWorker_ResolveAccess_SkipsInvalidRuntimeIdentifiers(t *testing.T) {
+	w := TrafficCollectorWorker{
+		Accesses: &tcAccessRepo{
+			entries: map[string]*access.DeviceAccess{},
+		},
+	}
+	_, err := w.resolveAccess(context.Background(), "n1", NodeTrafficCounter{
+		DeviceAccessID: "",
+		AllowedIP:      "(none)",
+	})
+	if err == nil {
+		t.Fatal("expected resolve error for empty identifiers")
+	}
+}
+
+func TestTrafficCollectorWorker_ResolveAccess_ByAssignedIPWithoutCIDR(t *testing.T) {
+	w := TrafficCollectorWorker{
+		Accesses: &tcAccessRepo{
+			entries: map[string]*access.DeviceAccess{},
+			byNodeIP: map[string]*access.DeviceAccess{
+				"n1|10.8.1.3": {ID: "a1", DeviceID: "d1"},
+			},
+		},
+	}
+	got, err := w.resolveAccess(context.Background(), "n1", NodeTrafficCounter{
+		AllowedIP: "10.8.1.3/32",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got == nil || got.AccessID != "a1" || got.DeviceID != "d1" {
+		t.Fatalf("unexpected resolved access: %+v", got)
+	}
+}
+
 type tcNodeRepo struct{ nodes []*node.Node }
 
 func (r *tcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }

@@ -13,7 +13,7 @@ import (
 const (
 	LedgerInviteBonus      = "invite_bonus"
 	LedgerDailyCharge      = "daily_charge"
-	LedgerTopup            = "topup"
+	LedgerTopup            = "payment"
 	LedgerManualAdjustment = "manual_adjustment"
 )
 
