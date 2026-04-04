@@ -46,11 +46,11 @@ type Config struct {
 	AmneziaPort                string
 	XrayContainerName          string
 	XrayConfigPath             string
-	XrayRealityPublicKeyFile   string
 	XrayPublicHost             string
 	XrayRealityPort            int
 	XrayRealityServerName      string
 	XrayRealityShortID         string
+	XrayRealityPrivateKey      string
 	XrayRealityPublicKey       string
 	DockerBinaryPath           string
 	VPNSubnetCIDR              string
@@ -133,14 +133,11 @@ func LoadConfig(serviceName string) (Config, error) {
 		AmneziaPort:             firstNonEmpty(os.Getenv("AMNEZIA_PORT"), os.Getenv("AMNEZIA_LISTEN_PORT")),
 		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", ""),
 		XrayConfigPath:          envOrDefault("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
-		XrayRealityPublicKeyFile: envOrDefault(
-			"XRAY_REALITY_PUBLIC_KEY_FILE",
-			"/etc/xray/reality.publickey",
-		),
 		XrayPublicHost:          envOrDefault("XRAY_PUBLIC_HOST", ""),
 		XrayRealityPort:         intFromEnv("XRAY_REALITY_PORT", 8443),
 		XrayRealityServerName:   envOrDefault("XRAY_REALITY_SERVER_NAME", "www.cloudflare.com"),
 		XrayRealityShortID:      envOrDefault("XRAY_REALITY_SHORT_ID", "0123456789abcdef"),
+		XrayRealityPrivateKey:   envOrDefault("XRAY_REALITY_PRIVATE_KEY", ""),
 		XrayRealityPublicKey:    envOrDefault("XRAY_REALITY_PUBLIC_KEY", ""),
 		DockerBinaryPath:        envOrDefault("DOCKER_BINARY_PATH", "docker"),
 		VPNSubnetCIDR:           envOrDefault("VPN_SUBNET_CIDR", "10.8.1.0/24"),
@@ -308,7 +305,7 @@ func csvListFromEnvOrDefault(key string, fallback []string) []string {
 }
 
 func (c *Config) applyKeyFileOverrides() {
-	for _, filePath := range []string{c.VPNServerPublicKeyFile, c.XrayRealityPublicKeyFile} {
+	for _, filePath := range []string{c.VPNServerPublicKeyFile} {
 		if strings.TrimSpace(filePath) == "" {
 			continue
 		}
@@ -319,9 +316,6 @@ func (c *Config) applyKeyFileOverrides() {
 		if filePath == c.VPNServerPublicKeyFile {
 			c.VPNServerPublicKey = key
 			c.VPNServerPublicKeyFromFile = true
-		}
-		if filePath == c.XrayRealityPublicKeyFile {
-			c.XrayRealityPublicKey = key
 		}
 	}
 }

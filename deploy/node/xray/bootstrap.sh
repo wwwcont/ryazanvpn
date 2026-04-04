@@ -3,11 +3,12 @@ set -eu
 
 CONFIG_PATH="${XRAY_CONFIG_PATH:-/etc/xray/config.json}"
 METADATA_PATH="${XRAY_RUNTIME_METADATA_PATH:-/etc/xray/runtime-metadata.json}"
-PUBLIC_KEY_PATH="${XRAY_REALITY_PUBLIC_KEY_FILE:-/etc/xray/reality.publickey}"
 LISTEN_PORT="${XRAY_REALITY_PORT:-8443}"
 SERVER_NAME="${XRAY_REALITY_SERVER_NAME:-www.cloudflare.com}"
 SHORT_ID="${XRAY_REALITY_SHORT_ID:-0123456789abcdef}"
 PUBLIC_HOST="${XRAY_PUBLIC_HOST:-}"
+ENV_PRIVATE_KEY="${XRAY_REALITY_PRIVATE_KEY:-}"
+ENV_PUBLIC_KEY="${XRAY_REALITY_PUBLIC_KEY:-}"
 
 trim() {
   printf '%s' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
@@ -15,29 +16,6 @@ trim() {
 
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
-
-xray_genkeypair() {
-  out="$(xray x25519 2>/dev/null || true)"
-  private="$(printf '%s\n' "$out" | awk -F': *' '/Private key/ {print $2; exit}')"
-  public="$(printf '%s\n' "$out" | awk -F': *' '/Public key/ {print $2; exit}')"
-  private="$(trim "$private")"
-  public="$(trim "$public")"
-  if [ -n "$private" ] && [ -n "$public" ]; then
-    printf '%s\n%s\n' "$private" "$public"
-    return 0
-  fi
-  return 1
-}
-
-derive_public_from_private() {
-  private="$1"
-  [ -n "$private" ] || return 1
-  out="$(printf '%s\n' "$private" | xray x25519 -i 2>/dev/null || true)"
-  public="$(printf '%s\n' "$out" | awk -F': *' '/Public key/ {print $2; exit}')"
-  public="$(trim "$public")"
-  [ -n "$public" ] || return 1
-  printf '%s\n' "$public"
 }
 
 read_json_field() {
@@ -80,7 +58,6 @@ write_metadata() {
   "short_id": "$(json_escape "$short_id")",
   "public_host": "$(json_escape "$PUBLIC_HOST")",
   "reality_public_key": "$(json_escape "$public_key")",
-  "reality_public_key_file": "$(json_escape "$PUBLIC_KEY_PATH")",
   "config_path": "$(json_escape "$CONFIG_PATH")",
   "runtime_source": "xray",
   "private_key_present": $( [ -n "$private_key" ] && printf 'true' || printf 'false')
@@ -88,23 +65,18 @@ write_metadata() {
 EOF
 }
 
-ensure_public_key_file() {
-  public_key="$1"
-  [ -n "$public_key" ] || return 1
-  mkdir -p "$(dirname "$PUBLIC_KEY_PATH")"
-  umask 077
-  printf '%s\n' "$public_key" > "$PUBLIC_KEY_PATH"
-}
+if [ -z "$ENV_PRIVATE_KEY" ]; then
+  echo "xray.bootstrap.error reason=private_key_missing env=XRAY_REALITY_PRIVATE_KEY" >&2
+  exit 1
+fi
+if [ -z "$ENV_PUBLIC_KEY" ]; then
+  echo "xray.bootstrap.error reason=public_key_missing env=XRAY_REALITY_PUBLIC_KEY" >&2
+  exit 1
+fi
+echo "xray.reality.private_key.source=env" >&2
+echo "xray.reality.public_key.source=env" >&2
 
 if [ ! -f "$CONFIG_PATH" ]; then
-  keypair="$(xray_genkeypair || true)"
-  private_key="$(printf '%s\n' "$keypair" | sed -n '1p')"
-  public_key="$(printf '%s\n' "$keypair" | sed -n '2p')"
-  if [ -z "$private_key" ] || [ -z "$public_key" ]; then
-    echo "xray.bootstrap.error reason=keypair_generation_failed" >&2
-    exit 1
-  fi
-
   mkdir -p "$(dirname "$CONFIG_PATH")"
   umask 077
   cat > "$CONFIG_PATH" <<EOF
@@ -132,7 +104,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
           "serverNames": [
             "$(json_escape "$SERVER_NAME")"
           ],
-          "privateKey": "$(json_escape "$private_key")",
+          "privateKey": "$(json_escape "$ENV_PRIVATE_KEY")",
           "shortIds": [
             "$(json_escape "$SHORT_ID")"
           ]
@@ -148,8 +120,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
   ]
 }
 EOF
-  ensure_public_key_file "$public_key" || echo "xray.bootstrap.warning reason=public_key_file_write_failed path=$PUBLIC_KEY_PATH" >&2
-  write_metadata "$public_key" "$SHORT_ID" "$SERVER_NAME" "$LISTEN_PORT" "$private_key" || echo "xray.bootstrap.warning reason=metadata_write_failed path=$METADATA_PATH" >&2
+  write_metadata "$ENV_PUBLIC_KEY" "$SHORT_ID" "$SERVER_NAME" "$LISTEN_PORT" "$ENV_PRIVATE_KEY" || echo "xray.bootstrap.warning reason=metadata_write_failed path=$METADATA_PATH" >&2
   echo "xray.bootstrap.generated config=$CONFIG_PATH" >&2
 else
   private_key="$(trim "$(read_json_field privateKey)")"
@@ -160,25 +131,14 @@ else
   [ -n "$short_id" ] || short_id="$SHORT_ID"
   [ -n "$server_name" ] || server_name="$SERVER_NAME"
   [ -n "$listen_port" ] || listen_port="$LISTEN_PORT"
-
-  public_key=""
-  if [ -f "$PUBLIC_KEY_PATH" ]; then
-    public_key="$(trim "$(cat "$PUBLIC_KEY_PATH" 2>/dev/null || true)")"
+  if [ -z "$private_key" ]; then
+    echo "xray.bootstrap.error reason=runtime_private_key_missing config=$CONFIG_PATH" >&2
+    exit 1
   fi
-  if [ -z "$public_key" ]; then
-    public_key="$(derive_public_from_private "$private_key" || true)"
-    if [ -n "$public_key" ]; then
-      ensure_public_key_file "$public_key" || echo "xray.bootstrap.warning reason=public_key_file_write_failed path=$PUBLIC_KEY_PATH" >&2
-    fi
+  if [ "$private_key" != "$ENV_PRIVATE_KEY" ]; then
+    echo "xray.bootstrap.error reason=private_key_mismatch config=$CONFIG_PATH env=XRAY_REALITY_PRIVATE_KEY" >&2
+    exit 1
   fi
-
-  if [ -n "$public_key" ]; then
-    write_metadata "$public_key" "$short_id" "$server_name" "$listen_port" "$private_key" || echo "xray.bootstrap.warning reason=metadata_write_failed path=$METADATA_PATH" >&2
-  else
-    echo "xray.bootstrap.warning reason=public_key_unavailable config=$CONFIG_PATH" >&2
-    if [ ! -f "$METADATA_PATH" ]; then
-      write_metadata "" "$short_id" "$server_name" "$listen_port" "$private_key" || true
-    fi
-  fi
+  write_metadata "$ENV_PUBLIC_KEY" "$short_id" "$server_name" "$listen_port" "$private_key" || echo "xray.bootstrap.warning reason=metadata_write_failed path=$METADATA_PATH" >&2
   echo "xray.bootstrap.reused config=$CONFIG_PATH" >&2
 fi

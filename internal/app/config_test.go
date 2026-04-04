@@ -55,18 +55,13 @@ func TestLoadConfigControlPlaneRequiresPostgres(t *testing.T) {
 func TestLoadConfigPrefersPublicKeyFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	vpnKeyFile := filepath.Join(tmpDir, "server.publickey")
-	xrayPubFile := filepath.Join(tmpDir, "reality.publickey")
 
 	if err := os.WriteFile(vpnKeyFile, []byte("runtime-awg-file-key\n"), 0o600); err != nil {
 		t.Fatalf("write vpn key file: %v", err)
 	}
-	if err := os.WriteFile(xrayPubFile, []byte("runtime-xray-file-key\n"), 0o600); err != nil {
-		t.Fatalf("write xray key file: %v", err)
-	}
 
 	t.Setenv("POSTGRES_URL", "postgres://example")
 	t.Setenv("VPN_SERVER_PUBLIC_KEY_FILE", vpnKeyFile)
-	t.Setenv("XRAY_REALITY_PUBLIC_KEY_FILE", xrayPubFile)
 	t.Setenv("VPN_SERVER_PUBLIC_KEY", "env-awg-key")
 	t.Setenv("XRAY_REALITY_PUBLIC_KEY", "env-xray-key")
 
@@ -81,7 +76,7 @@ func TestLoadConfigPrefersPublicKeyFiles(t *testing.T) {
 	if !cfg.VPNServerPublicKeyFromFile {
 		t.Fatal("expected VPNServerPublicKeyFromFile=true")
 	}
-	if cfg.XrayRealityPublicKey != "runtime-xray-file-key" {
-		t.Fatalf("expected xray public key from file, got %q", cfg.XrayRealityPublicKey)
+	if cfg.XrayRealityPublicKey != "env-xray-key" {
+		t.Fatalf("expected xray public key from env, got %q", cfg.XrayRealityPublicKey)
 	}
 }

@@ -33,6 +33,21 @@ def run(cmd):
         raise SystemExit(f"sync-runtime-from-configs: command failed: {' '.join(cmd)} :: {p.stderr.strip() or p.stdout.strip()}")
     return p.stdout.strip()
 
+def read_text_from_host_or_container(path: str, *, docker_bin: str, container: str, description: str) -> str:
+    src = (path or "").strip()
+    if not src:
+        raise SystemExit(f"sync-runtime-from-configs: {description} path is required")
+
+    p = Path(src)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+
+    if not container:
+        raise SystemExit(
+            f"sync-runtime-from-configs: {description} not found on host ({src}) and XRAY_CONTAINER_NAME is not set"
+        )
+    return run([docker_bin, "exec", container, "cat", src])
+
 def endpoint_with_port(host_or_endpoint: str, port: str) -> str:
     value = (host_or_endpoint or "").strip()
     if not value:
@@ -77,12 +92,27 @@ endpoint = endpoint_with_port(vpn_host, amnezia_port)
 if endpoint:
     updates["VPN_SERVER_PUBLIC_ENDPOINT"] = endpoint
 
-# --- Xray: source of truth is configured JSON + optional key file ---
+# --- Xray: source of truth is configured JSON + env keys ---
 xray_cfg_path = (env.get("XRAY_SOURCE_CONFIG_PATH") or "").strip()
 if not xray_cfg_path:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH is required")
+xray_container = (env.get("XRAY_CONTAINER_NAME") or "").strip()
+xray_private_key_env = (env.get("XRAY_REALITY_PRIVATE_KEY") or "").strip()
+xray_public_key_env = (env.get("XRAY_REALITY_PUBLIC_KEY") or "").strip()
+if not xray_private_key_env:
+    raise SystemExit("sync-runtime-from-configs: XRAY_REALITY_PRIVATE_KEY is required")
+if not xray_public_key_env:
+    raise SystemExit("sync-runtime-from-configs: XRAY_REALITY_PUBLIC_KEY is required")
+print("xray.reality.private_key.source=env")
+print("xray.reality.public_key.source=env")
 
-xray_data = json.loads(Path(xray_cfg_path).read_text(encoding="utf-8"))
+xray_cfg_text = read_text_from_host_or_container(
+    xray_cfg_path,
+    docker_bin=docker_bin,
+    container=xray_container,
+    description="XRAY_SOURCE_CONFIG_PATH",
+)
+xray_data = json.loads(xray_cfg_text)
 inbounds = xray_data.get("inbounds") or []
 if not inbounds:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH has no inbounds")
@@ -93,6 +123,13 @@ if port is not None:
     updates["XRAY_REALITY_PORT"] = str(port)
 
 reality = ((inbound.get("streamSettings") or {}).get("realitySettings") or {})
+runtime_private_key = str(reality.get("privateKey") or "").strip()
+if not runtime_private_key:
+    raise SystemExit("sync-runtime-from-configs: runtime xray reality privateKey is missing in XRAY_SOURCE_CONFIG_PATH")
+if runtime_private_key != xray_private_key_env:
+    print("sync-runtime-from-configs: xray reality private key mismatch between runtime config and env", file=sys.stderr)
+    raise SystemExit("sync-runtime-from-configs: XRAY_REALITY_PRIVATE_KEY does not match runtime config privateKey")
+
 server_names = reality.get("serverNames") or []
 short_ids = reality.get("shortIds") or []
 if server_names:
@@ -101,13 +138,8 @@ if short_ids:
     updates["XRAY_REALITY_SHORT_ID"] = str(short_ids[0])
 if not (env.get("XRAY_PUBLIC_HOST") or "").strip() and server_names:
     updates["XRAY_PUBLIC_HOST"] = str(server_names[0])
-
-xray_pub_path = (env.get("XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH") or env.get("XRAY_REALITY_PUBLIC_KEY_FILE") or "").strip()
-if xray_pub_path:
-    updates["XRAY_REALITY_PUBLIC_KEY"] = Path(xray_pub_path).read_text(encoding="utf-8").strip()
-
-if not updates.get("XRAY_REALITY_PUBLIC_KEY") and not (env.get("XRAY_REALITY_PUBLIC_KEY") or "").strip():
-    raise SystemExit("sync-runtime-from-configs: set XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH or XRAY_REALITY_PUBLIC_KEY")
+updates["XRAY_REALITY_PRIVATE_KEY"] = xray_private_key_env
+updates["XRAY_REALITY_PUBLIC_KEY"] = xray_public_key_env
 
 # write back env file
 seen = set()
