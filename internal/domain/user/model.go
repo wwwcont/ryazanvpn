@@ -9,14 +9,16 @@ import (
 var ErrNotFound = errors.New("user not found")
 
 type User struct {
-	ID         string
-	TelegramID int64
-	Username   string
-	FirstName  string
-	LastName   string
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID             string
+	TelegramID     int64
+	Username       string
+	FirstName      string
+	LastName       string
+	Status         string
+	BalanceKopecks int64
+	LastChargeAt   *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Repository interface {

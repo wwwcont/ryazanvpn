@@ -35,6 +35,26 @@ func TestStartRegistersAndShowsMenu(t *testing.T) {
 	if bot.messages[0].markup == nil || len(bot.messages[0].markup.InlineKeyboard) == 0 {
 		t.Fatal("expected inline keyboard menu")
 	}
+	if !strings.Contains(bot.messages[0].text, "Баланс:") {
+		t.Fatalf("expected balance in main menu text, got %q", bot.messages[0].text)
+	}
+}
+
+func TestEveryTelegramSubmenuHasBackHome(t *testing.T) {
+	menus := []*InlineKeyboardMarkup{speedMenu(), healthMenu(), configReadyMenu(), backMainMenu()}
+	for i, menu := range menus {
+		has := false
+		for _, row := range menu.InlineKeyboard {
+			for _, btn := range row {
+				if strings.Contains(btn.Text, "На главную") {
+					has = true
+				}
+			}
+		}
+		if !has {
+			t.Fatalf("menu %d does not include back home button", i)
+		}
+	}
 }
 
 func TestEnterCodePutsIntoAwaitState(t *testing.T) {

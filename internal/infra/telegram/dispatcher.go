@@ -179,7 +179,7 @@ func (s *TelegramService) handleMessage(ctx context.Context, msg *Message) {
 	switch text {
 	case "/start":
 		_ = s.States.Set(ctx, msg.From.ID, StateIdle)
-		s.sendMainMenu(ctx, msg.Chat.ID, s.isAdmin(msg.From.ID))
+		s.sendMainMenu(ctx, msg.Chat.ID, u, s.isAdmin(msg.From.ID))
 		if s.AccessGrants != nil {
 			if grant, err := s.AccessGrants.GetLatestByUserID(ctx, u.ID); err == nil && grant != nil && grant.Status == accessgrant.StatusActive {
 				s.sendAccessStatus(ctx, msg.Chat.ID, u.ID)
@@ -194,10 +194,10 @@ func (s *TelegramService) handleMessage(ctx context.Context, msg *Message) {
 	case "Ввести код":
 		s.promptInviteCode(ctx, msg.Chat.ID, msg.From.ID)
 		return
-	case "Мой доступ":
+	case "Мои подключения":
 		s.sendAccessStatus(ctx, msg.Chat.ID, u.ID)
 		return
-	case "Мой баланс":
+	case "Баланс":
 		s.sendBalance(ctx, msg.Chat.ID, u)
 		return
 	case "Speed":
@@ -212,8 +212,11 @@ func (s *TelegramService) handleMessage(ctx context.Context, msg *Message) {
 	case "История кодов":
 		s.sendCodesHistoryInfo(ctx, msg.Chat.ID)
 		return
-	case "Получить конфиг":
+	case "Получить подключение":
 		s.handleGetConfig(ctx, msg.Chat.ID, u.ID)
+		return
+	case "Пополнить баланс":
+		_ = s.Bot.SendMessage(ctx, msg.Chat.ID, "Пополнение скоро будет доступно в боте. Сейчас напишите администратору для ручного пополнения.", backMainMenu())
 		return
 	case "Удалить устройство":
 		s.askDeleteConfirm(ctx, msg.Chat.ID, msg.From.ID)
@@ -325,8 +328,8 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 		s.sendTrafficInfo(ctx, chatID, u.ID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю трафик")
 	case cbHistory:
-		s.sendCodesHistoryInfo(ctx, chatID)
-		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Показываю историю")
+		_ = s.Bot.SendMessage(ctx, chatID, "Пополнение скоро будет доступно в боте. Сейчас напишите администратору для ручного пополнения.", backMainMenu())
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Пополнение")
 	case cbConfig:
 		s.handleGetConfig(ctx, chatID, u.ID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Готовлю конфиг")
@@ -377,7 +380,7 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 		s.askDeleteConfirm(ctx, chatID, cb.From.ID)
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Подтвердите перевыпуск Health")
 	case cbBackMain:
-		s.sendMainMenu(ctx, chatID, s.isAdmin(cb.From.ID))
+		s.sendMainMenu(ctx, chatID, u, s.isAdmin(cb.From.ID))
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Главное меню")
 	default:
 		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Неизвестное действие")
@@ -476,8 +479,16 @@ func (s *TelegramService) ensureUser(ctx context.Context, from User, chatID int6
 	return u, true
 }
 
-func (s *TelegramService) sendMainMenu(ctx context.Context, chatID int64, isAdmin bool) {
-	text := "Добро пожаловать в RyazanVPN 👋\n\nЗдесь вы можете активировать доступ, проверить баланс и состояние сети.\n\nЧто такое Speed:\n• текущая производительность и стабильность канала.\n\nЧто такое Health:\n• состояние нод и сервиса в целом.\n\nЕсли у вас еще нет доступа — нажмите «Ввести код»."
+func (s *TelegramService) sendMainMenu(ctx context.Context, chatID int64, u *user.User, isAdmin bool) {
+	statusText := "Активен"
+	balance := int64(0)
+	if u != nil {
+		balance = u.BalanceKopecks
+		if u.Status == user.StatusBlockedForNonpayment {
+			statusText = "Приостановлен из-за нулевого баланса"
+		}
+	}
+	text := fmt.Sprintf("Добро пожаловать в RyazanVPN 👋\n\nБаланс: %s\nСтатус доступа: %s", formatRub(balance), statusText)
 	_ = s.Bot.SendMessage(ctx, chatID, text, mainMenu(isAdmin))
 	if isAdmin {
 		_ = s.Bot.SendMessage(ctx, chatID, "Админ-меню:", adminMenu())
@@ -486,7 +497,7 @@ func (s *TelegramService) sendMainMenu(ctx context.Context, chatID int64, isAdmi
 
 func (s *TelegramService) promptInviteCode(ctx context.Context, chatID, telegramID int64) {
 	_ = s.States.Set(ctx, telegramID, StateAwaitingInviteCode)
-	_ = s.Bot.SendMessage(ctx, chatID, "Введите 4-значный invite code:", nil)
+	_ = s.Bot.SendMessage(ctx, chatID, "Введите 4-значный invite code:", backMainMenu())
 }
 
 func (s *TelegramService) handleInviteCode(ctx context.Context, chatID, telegramID int64, userID, code string) {
@@ -504,12 +515,13 @@ func (s *TelegramService) handleInviteCode(ctx context.Context, chatID, telegram
 			return
 		}
 		s.logInfo("telegram.activate_invite.success", "telegram_user_id", telegramID, "chat_id", chatID, "invite_code", code, "user_id", userID)
-		_ = s.Bot.SendMessage(ctx, chatID, "Код активирован ✅", nil)
+		_ = s.Bot.SendMessage(ctx, chatID, "Код активирован ✅ Начислено 250 ₽.", backMainMenu())
 		if s.Users != nil {
 			if u, err := s.Users.GetByID(ctx, userID); err == nil && u != nil {
 				s.sendBalance(ctx, chatID, u)
 			}
 		}
+		_ = s.Bot.SendMessage(ctx, chatID, "Теперь получите подключение: сначала Xray, затем Amnezia/WireGuard.", backMainMenu())
 	}
 	_ = s.States.Set(ctx, telegramID, StateIdle)
 	s.handleGetConfig(ctx, chatID, userID)
@@ -626,6 +638,11 @@ func (s *TelegramService) sendAccessStatus(ctx context.Context, chatID int64, us
 func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, userID string) {
 	s.logInfo("telegram.config_flow.start", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", "", "protocol", "")
 	s.logInfo("telegram.config_flow.default_protocol", "chat_id", chatID, "user_id", userID, "protocol", "xray")
+	if s.Users != nil {
+		if u, err := s.Users.GetByID(ctx, userID); err == nil && u != nil && u.Status == user.StatusBlockedForNonpayment {
+			_ = s.Bot.SendMessage(ctx, chatID, "Ваш доступ временно приостановлен из-за нулевого баланса. Пополните баланс, и доступ восстановится автоматически.", backMainMenu())
+		}
+	}
 	grant, err := s.GetGrantUC.Execute(ctx, app.GetActiveAccessGrantByUserInput{UserID: userID})
 	if err != nil {
 		if errors.Is(err, accessgrant.ErrNotFound) {
@@ -678,14 +695,14 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 		if _, err := s.resolveActiveAccessIDByProtocol(ctx, userID, "wireguard"); err != nil {
 			s.logInfo("telegram.config_blob.empty", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", "", "protocol", "wireguard", "action", "recreate_device")
 			s.logInfo("telegram.config_regenerate.start", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "protocol", "wireguard")
-				for _, item := range actives {
-					if item == nil {
-						continue
-					}
-					if s.RevokeAccessUC != nil {
-						_ = s.RevokeAccessUC.Execute(ctx, app.RevokeDeviceAccessInput{AccessID: item.ID})
-					}
+			for _, item := range actives {
+				if item == nil {
+					continue
 				}
+				if s.RevokeAccessUC != nil {
+					_ = s.RevokeAccessUC.Execute(ctx, app.RevokeDeviceAccessInput{AccessID: item.ID})
+				}
+			}
 			_ = s.Devices.Revoke(ctx, d.ID)
 			out, createErr := s.CreateDeviceUC.Execute(ctx, app.CreateDeviceForUserInput{UserID: userID, Name: "telegram-device", Platform: "telegram"})
 			if createErr != nil {
@@ -718,7 +735,10 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 
 func (s *TelegramService) askDeleteConfirm(ctx context.Context, chatID, telegramID int64) {
 	_ = s.States.Set(ctx, telegramID, StateAwaitingConfirmReissue)
-	_ = s.Bot.SendMessage(ctx, chatID, "Удалить активное устройство?", &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "Да", Data: cbDeleteYes}, {Text: "Нет", Data: cbDeleteNo}}}})
+	_ = s.Bot.SendMessage(ctx, chatID, "Удалить активное устройство?", &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
+		{{Text: "Да", Data: cbDeleteYes}, {Text: "Нет", Data: cbDeleteNo}},
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
+	}})
 }
 
 func (s *TelegramService) handleDeleteDevice(ctx context.Context, chatID, telegramID int64, userID string) {
@@ -737,11 +757,19 @@ func (s *TelegramService) handleDeleteDevice(ctx context.Context, chatID, telegr
 }
 
 func (s *TelegramService) sendHelp(ctx context.Context, chatID int64) {
-	_ = s.Bot.SendMessage(ctx, chatID, "Помощь:\n• Speed (AmneziaWG) — основной быстрый режим.\n• Health (Xray Reality) — резерв для сложных сетей.\n• Если Speed нестабилен — переключитесь на Health.\n• Перевыпуск: кнопка «Перевыпустить ключи» или внутри экрана протокола.\n• Подключение Speed: импорт .conf/QR.\n• Подключение Health: вставьте ссылку в Hiddify/v2rayN/Streisand.\n• Если ничего не помогает — отправьте в поддержку Telegram ID и время ошибки.", nil)
+	_ = s.Bot.SendMessage(ctx, chatID, "Помощь:\n• Speed (AmneziaWG) — основной быстрый режим.\n• Health (Xray Reality) — резерв для сложных сетей.\n• Если Speed нестабилен — переключитесь на Health.", backMainMenu())
 }
 
 func (s *TelegramService) sendBalance(ctx context.Context, chatID int64, u *user.User) {
-	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Баланс аккаунта: статус пользователя — %s.\nПодробный денежный баланс доступен у администратора.", u.Status), nil)
+	statusText := "Активен"
+	if u.Status == user.StatusBlockedForNonpayment {
+		statusText = "Приостановлен из-за нулевого баланса"
+	}
+	msg := fmt.Sprintf("Текущий баланс: %s\nЕжедневная стоимость: 10 ₽ / сутки\nСтатус: %s", formatRub(u.BalanceKopecks), statusText)
+	if u.Status == user.StatusBlockedForNonpayment {
+		msg += "\nДоступ временно остановлен до пополнения."
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, msg, backMainMenu())
 }
 
 func (s *TelegramService) sendSpeedInfo(ctx context.Context, chatID int64, userID string) {
@@ -759,11 +787,11 @@ func (s *TelegramService) sendTrafficInfo(ctx context.Context, chatID int64, use
 	}
 	total, _ := s.Traffic.GetUserTrafficTotal(ctx, userID)
 	last30, _ := s.Traffic.GetUserTrafficLastNDays(ctx, userID, 30, time.Now().UTC())
-	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Трафик всего (все протоколы): %s\nТрафик за 30 дней (все протоколы): %s\nSpeed: доступно в агрегате\nHealth: доступно в агрегате", humanBytes(total), humanBytes(last30)), nil)
+	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Трафик всего (все протоколы): %s\nТрафик за 30 дней (все протоколы): %s\nSpeed: доступно в агрегате\nHealth: доступно в агрегате", humanBytes(total), humanBytes(last30)), backMainMenu())
 }
 
 func (s *TelegramService) sendCodesHistoryInfo(ctx context.Context, chatID int64) {
-	_ = s.Bot.SendMessage(ctx, chatID, "История кодов доступна по запросу у администратора.\nВ пользовательском интерфейсе полные коды не показываются из соображений безопасности.", nil)
+	_ = s.Bot.SendMessage(ctx, chatID, "История кодов доступна по запросу у администратора.\nВ пользовательском интерфейсе полные коды не показываются из соображений безопасности.", backMainMenu())
 }
 
 func (s *TelegramService) sendHealthLink(ctx context.Context, chatID int64, userID string) {
@@ -1023,11 +1051,11 @@ func (s *TelegramService) findUser(ctx context.Context, token string) (*user.Use
 
 func mainMenu(isAdmin bool) *InlineKeyboardMarkup {
 	rows := [][]InlineKeyboardButton{
-		{{Text: "Ввести код", Data: cbEnterCode}, {Text: "Мой доступ", Data: cbMyAccess}},
-		{{Text: "Мой баланс", Data: cbMyBalance}},
-		{{Text: "Speed", Data: cbSpeed}, {Text: "Health", Data: cbHealth}},
-		{{Text: "Трафик", Data: cbTraffic}, {Text: "История кодов", Data: cbHistory}},
-		{{Text: "Получить конфиг", Data: cbConfig}},
+		{{Text: "Ввести код", Data: cbEnterCode}},
+		{{Text: "Получить подключение", Data: cbConfig}},
+		{{Text: "Мои подключения", Data: cbMyAccess}},
+		{{Text: "Пополнить баланс", Data: cbHistory}},
+		{{Text: "Баланс", Data: cbMyBalance}},
 		{{Text: "Перевыпустить ключи", Data: cbDelete}},
 		{{Text: "Помощь", Data: cbHelp}},
 	}
@@ -1042,7 +1070,7 @@ func speedMenu() *InlineKeyboardMarkup {
 		{{Text: "Скачать .conf", Data: cbSpeedConf}},
 		{{Text: "Показать QR", Data: cbSpeedQR}, {Text: "Показать текст", Data: cbSpeedText}},
 		{{Text: "Перевыпустить Speed", Data: cbSpeedReissue}},
-		{{Text: "⬅️ Главное меню", Data: cbBackMain}},
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
 	}}
 }
 
@@ -1051,7 +1079,7 @@ func healthMenu() *InlineKeyboardMarkup {
 		{{Text: "Получить ключ/ссылку", Data: cbHealthLink}},
 		{{Text: "Инструкция подключения", Data: cbHealthHowTo}},
 		{{Text: "Перевыпустить Health", Data: cbHealthReissue}},
-		{{Text: "⬅️ Главное меню", Data: cbBackMain}},
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
 	}}
 }
 
@@ -1060,7 +1088,23 @@ func configReadyMenu() *InlineKeyboardMarkup {
 		{{Text: "Скачать .conf", Data: cbCfgFile}},
 		{{Text: "Показать QR", Data: cbCfgQR}, {Text: "Показать текст", Data: cbCfgText}},
 		{{Text: "Ключ для DefaultVPN", Data: cbCfgDefVPN}},
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
 	}}
+}
+
+func backMainMenu() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
+	}}
+}
+
+func formatRub(kopecks int64) string {
+	sign := ""
+	if kopecks < 0 {
+		sign = "-"
+		kopecks = -kopecks
+	}
+	return fmt.Sprintf("%s%d.%02d ₽", sign, kopecks/100, kopecks%100)
 }
 
 func adminMenu() *InlineKeyboardMarkup {
@@ -1069,7 +1113,7 @@ func adminMenu() *InlineKeyboardMarkup {
 		{{Text: "Invite codes", Data: cbAdminCodesX}, {Text: "Ноды", Data: cbAdminNodesX}},
 		{{Text: "Статусы нод", Data: cbAdminNode}, {Text: "Перевыпуск доступа", Data: cbAdminReissX}},
 		{{Text: "Заблокировать", Data: cbAdminBlockX}, {Text: "Разблокировать", Data: cbAdminUnblkX}},
-		{{Text: "⬅️ Главное меню", Data: cbBackMain}},
+		{{Text: "⬅️ На главную", Data: cbBackMain}},
 	}}
 }
 

@@ -181,7 +181,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		NodePublicIP:            envOrDefault("NODE_PUBLIC_IP", ""),
 		NodeCapacity:            intFromEnv("NODE_CAPACITY", 0),
 		DailyChargeInterval:     durationFromEnv("DAILY_CHARGE_INTERVAL", 1*time.Hour),
-		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 800)),
+		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 1000)),
 	}
 
 	cfg.applyKeyFileOverrides()

@@ -481,7 +481,10 @@ SELECT
 	da.assigned_ip::text
 FROM device_accesses da
 JOIN devices d ON d.id=da.device_id
-WHERE da.vpn_node_id=$1 AND da.status='active'`, nodeID)
+JOIN users u ON u.id=d.user_id
+WHERE da.vpn_node_id=$1
+  AND da.status='active'
+  AND u.status='active'`, nodeID)
 			if err != nil {
 				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load desired peers"})
 				return
