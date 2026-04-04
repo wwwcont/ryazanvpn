@@ -7,7 +7,7 @@
 ## Канонический production flow
 
 1. Вы **сами** поднимаете и обслуживаете runtime контейнеры Amnezia/Xray.
-2. В `.env.single.generated` указываете пути к их runtime-конфига/ключам (`AMNEZIA_CONFIG_PATH`, `XRAY_SOURCE_CONFIG_PATH`, ...).
+2. В `.env.single.generated` указываете runtime-параметры контейнера Amnezia (`AMNEZIA_CONTAINER_NAME`, `AMNEZIA_INTERFACE_NAME`) и путь к Xray config (`XRAY_SOURCE_CONFIG_PATH`).
 3. Запускаете **одну команду**:
 
 ```bash
@@ -37,8 +37,8 @@ curl -fsS http://localhost:8081/health
 ## Откуда берутся runtime-данные
 
 `scripts/sync-runtime-from-configs.sh` подтягивает:
-- из `AMNEZIA_CONFIG_PATH`: `AMNEZIA_PORT`, `VPN_SUBNET_CIDR`;
-- из `AMNEZIA_PUBLIC_KEY_SOURCE_PATH`: `VPN_SERVER_PUBLIC_KEY`;
+- из runtime Amnezia через `docker exec ... awg show`: `VPN_SERVER_PUBLIC_KEY`, `AMNEZIA_PORT`;
+- из runtime Amnezia через `ip addr show`: `VPN_SUBNET_CIDR` (если доступно);
 - из `XRAY_SOURCE_CONFIG_PATH`: `XRAY_REALITY_PORT`, `XRAY_REALITY_SERVER_NAME`, `XRAY_REALITY_SHORT_ID`;
 - из `XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH`: `XRAY_REALITY_PUBLIC_KEY`;
 - из `VPN_PUBLIC_HOST` + `AMNEZIA_PORT`: `VPN_SERVER_PUBLIC_ENDPOINT`.

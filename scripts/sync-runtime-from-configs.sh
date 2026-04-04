@@ -11,31 +11,30 @@ fi
 python3 - "$ENV_FILE" <<'PY'
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 env_path = Path(sys.argv[1])
-text = env_path.read_text(encoding="utf-8")
-lines = text.splitlines()
+lines = env_path.read_text(encoding="utf-8").splitlines()
 pattern = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
-def parse_env(lines):
-    out = {}
-    for line in lines:
+def parse_env(src_lines):
+    values = {}
+    for line in src_lines:
         m = pattern.match(line)
         if m:
-            out[m.group(1)] = m.group(2)
-    return out
+            values[m.group(1)] = m.group(2)
+    return values
 
-def read_text(path_str: str) -> str:
-    path = Path(path_str.strip())
-    return path.read_text(encoding="utf-8")
-
-def read_trimmed(path_str: str) -> str:
-    return read_text(path_str).strip()
+def run(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit(f"sync-runtime-from-configs: command failed: {' '.join(cmd)} :: {p.stderr.strip() or p.stdout.strip()}")
+    return p.stdout.strip()
 
 def endpoint_with_port(host_or_endpoint: str, port: str) -> str:
-    value = host_or_endpoint.strip()
+    value = (host_or_endpoint or "").strip()
     if not value:
         return ""
     if ":" in value:
@@ -45,48 +44,46 @@ def endpoint_with_port(host_or_endpoint: str, port: str) -> str:
 env = parse_env(lines)
 updates = {}
 
-amnezia_cfg_path = (env.get("AMNEZIA_CONFIG_PATH") or "").strip()
-if not amnezia_cfg_path:
-    raise SystemExit("sync-runtime-from-configs: AMNEZIA_CONFIG_PATH is required")
+# --- Amnezia: source of truth is runtime state ---
+docker_bin = (env.get("DOCKER_BINARY_PATH") or "docker").strip() or "docker"
+container = (env.get("AMNEZIA_CONTAINER_NAME") or "").strip()
+iface = (env.get("AMNEZIA_INTERFACE_NAME") or "").strip()
+if not container:
+    raise SystemExit("sync-runtime-from-configs: AMNEZIA_CONTAINER_NAME is required")
+if not iface:
+    raise SystemExit("sync-runtime-from-configs: AMNEZIA_INTERFACE_NAME is required")
 
-am_text = read_text(amnezia_cfg_path)
-listen_port = ""
-subnet = ""
-for raw in am_text.splitlines():
-    line = raw.strip()
-    if not line or line.startswith("#"):
-        continue
-    if "=" not in line:
-        continue
-    k, v = [x.strip() for x in line.split("=", 1)]
-    kl = k.lower()
-    if kl == "listenport":
-        listen_port = v
-    elif kl == "address" and not subnet:
-        subnet = v.split(",")[0].strip()
+amnezia_public_key = run([docker_bin, "exec", container, "awg", "show", iface, "public-key"])
+amnezia_port = run([docker_bin, "exec", container, "awg", "show", iface, "listen-port"])
+if not amnezia_public_key:
+    raise SystemExit("sync-runtime-from-configs: empty Amnezia public key from runtime")
+if not amnezia_port:
+    raise SystemExit("sync-runtime-from-configs: empty Amnezia listen port from runtime")
 
-if not listen_port:
-    raise SystemExit("sync-runtime-from-configs: ListenPort not found in AMNEZIA_CONFIG_PATH")
+updates["VPN_SERVER_PUBLIC_KEY"] = amnezia_public_key
+updates["AMNEZIA_PORT"] = amnezia_port
 
-updates["AMNEZIA_PORT"] = listen_port
-if subnet:
-    updates["VPN_SUBNET_CIDR"] = subnet
+try:
+    ip_out = run([docker_bin, "exec", container, "ip", "-o", "-f", "inet", "addr", "show", "dev", iface])
+    m = re.search(r"\binet\s+([^\s]+)", ip_out)
+    if m:
+        updates["VPN_SUBNET_CIDR"] = m.group(1).strip()
+except SystemExit:
+    # Keep existing VPN_SUBNET_CIDR if ip tool/addr is unavailable in runtime image.
+    pass
 
 vpn_host = (env.get("VPN_PUBLIC_HOST") or env.get("NODE_PUBLIC_IP") or env.get("VPN_SERVER_PUBLIC_ENDPOINT") or "").strip()
-endpoint = endpoint_with_port(vpn_host, listen_port)
+endpoint = endpoint_with_port(vpn_host, amnezia_port)
 if endpoint:
     updates["VPN_SERVER_PUBLIC_ENDPOINT"] = endpoint
 
-amnezia_pub_path = (env.get("AMNEZIA_PUBLIC_KEY_SOURCE_PATH") or env.get("VPN_SERVER_PUBLIC_KEY_FILE") or "").strip()
-if amnezia_pub_path:
-    updates["VPN_SERVER_PUBLIC_KEY"] = read_trimmed(amnezia_pub_path)
-
+# --- Xray: source of truth is configured JSON + optional key file ---
 xray_cfg_path = (env.get("XRAY_SOURCE_CONFIG_PATH") or "").strip()
 if not xray_cfg_path:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH is required")
 
-xray = json.loads(read_text(xray_cfg_path))
-inbounds = xray.get("inbounds") or []
+xray_data = json.loads(Path(xray_cfg_path).read_text(encoding="utf-8"))
+inbounds = xray_data.get("inbounds") or []
 if not inbounds:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH has no inbounds")
 
@@ -102,19 +99,17 @@ if server_names:
     updates["XRAY_REALITY_SERVER_NAME"] = str(server_names[0])
 if short_ids:
     updates["XRAY_REALITY_SHORT_ID"] = str(short_ids[0])
-
 if not (env.get("XRAY_PUBLIC_HOST") or "").strip() and server_names:
     updates["XRAY_PUBLIC_HOST"] = str(server_names[0])
 
 xray_pub_path = (env.get("XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH") or env.get("XRAY_REALITY_PUBLIC_KEY_FILE") or "").strip()
 if xray_pub_path:
-    updates["XRAY_REALITY_PUBLIC_KEY"] = read_trimmed(xray_pub_path)
+    updates["XRAY_REALITY_PUBLIC_KEY"] = Path(xray_pub_path).read_text(encoding="utf-8").strip()
 
-if not updates.get("VPN_SERVER_PUBLIC_KEY") and not (env.get("VPN_SERVER_PUBLIC_KEY") or "").strip():
-    raise SystemExit("sync-runtime-from-configs: set AMNEZIA_PUBLIC_KEY_SOURCE_PATH or VPN_SERVER_PUBLIC_KEY")
 if not updates.get("XRAY_REALITY_PUBLIC_KEY") and not (env.get("XRAY_REALITY_PUBLIC_KEY") or "").strip():
     raise SystemExit("sync-runtime-from-configs: set XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH or XRAY_REALITY_PUBLIC_KEY")
 
+# write back env file
 seen = set()
 out_lines = []
 for line in lines:
