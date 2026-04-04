@@ -40,10 +40,10 @@ curl -fsS http://localhost:8081/health
 - из runtime Amnezia через `docker exec ... awg show`: `VPN_SERVER_PUBLIC_KEY`, `AMNEZIA_PORT`;
 - из runtime Amnezia через `ip addr show`: `VPN_SUBNET_CIDR` (если доступно);
 - из `XRAY_SOURCE_CONFIG_PATH`: `XRAY_REALITY_PORT`, `XRAY_REALITY_SERVER_NAME`, `XRAY_REALITY_SHORT_ID`;
-- из `XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH`: `XRAY_REALITY_PUBLIC_KEY`;
+- из env: `XRAY_REALITY_PRIVATE_KEY`, `XRAY_REALITY_PUBLIC_KEY` (единый источник ключей);
 - из `VPN_PUBLIC_HOST` + `AMNEZIA_PORT`: `VPN_SERVER_PUBLIC_ENDPOINT`.
 
-Если путь к ключу не задан — можно оставить ручное значение в `.env`.
+`scripts/sync-runtime-from-configs.sh` валидирует, что `privateKey` в runtime Xray config совпадает с `XRAY_REALITY_PRIVATE_KEY`; при рассинхроне завершает работу с ошибкой.
 
 ## Runtime logic (не меняли)
 

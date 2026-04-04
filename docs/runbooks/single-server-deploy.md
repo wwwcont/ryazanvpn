@@ -21,7 +21,7 @@ cp deploy/env/single-server.env.example .env.single.generated
 Заполните `.env.single.generated`:
 - секреты (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `AGENT_HMAC_SECRET`, `ADMIN_API_SECRET`, `CONFIG_MASTER_KEY`, Telegram);
 - runtime container names (`AMNEZIA_CONTAINER_NAME`, `AMNEZIA_INTERFACE_NAME`, `XRAY_CONTAINER_NAME`);
-- source paths (`XRAY_SOURCE_CONFIG_PATH`, `XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH`);
+- source path (`XRAY_SOURCE_CONFIG_PATH`) и ключи Reality из env (`XRAY_REALITY_PRIVATE_KEY`, `XRAY_REALITY_PUBLIC_KEY`);
 - `VPN_PUBLIC_HOST`.
 
 ## 2) One-command запуск
