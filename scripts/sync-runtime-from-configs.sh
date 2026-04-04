@@ -33,6 +33,21 @@ def run(cmd):
         raise SystemExit(f"sync-runtime-from-configs: command failed: {' '.join(cmd)} :: {p.stderr.strip() or p.stdout.strip()}")
     return p.stdout.strip()
 
+def read_text_from_host_or_container(path: str, *, docker_bin: str, container: str, description: str) -> str:
+    src = (path or "").strip()
+    if not src:
+        raise SystemExit(f"sync-runtime-from-configs: {description} path is required")
+
+    p = Path(src)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+
+    if not container:
+        raise SystemExit(
+            f"sync-runtime-from-configs: {description} not found on host ({src}) and XRAY_CONTAINER_NAME is not set"
+        )
+    return run([docker_bin, "exec", container, "cat", src])
+
 def endpoint_with_port(host_or_endpoint: str, port: str) -> str:
     value = (host_or_endpoint or "").strip()
     if not value:
@@ -81,8 +96,15 @@ if endpoint:
 xray_cfg_path = (env.get("XRAY_SOURCE_CONFIG_PATH") or "").strip()
 if not xray_cfg_path:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH is required")
+xray_container = (env.get("XRAY_CONTAINER_NAME") or "").strip()
 
-xray_data = json.loads(Path(xray_cfg_path).read_text(encoding="utf-8"))
+xray_cfg_text = read_text_from_host_or_container(
+    xray_cfg_path,
+    docker_bin=docker_bin,
+    container=xray_container,
+    description="XRAY_SOURCE_CONFIG_PATH",
+)
+xray_data = json.loads(xray_cfg_text)
 inbounds = xray_data.get("inbounds") or []
 if not inbounds:
     raise SystemExit("sync-runtime-from-configs: XRAY_SOURCE_CONFIG_PATH has no inbounds")
@@ -104,7 +126,12 @@ if not (env.get("XRAY_PUBLIC_HOST") or "").strip() and server_names:
 
 xray_pub_path = (env.get("XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH") or env.get("XRAY_REALITY_PUBLIC_KEY_FILE") or "").strip()
 if xray_pub_path:
-    updates["XRAY_REALITY_PUBLIC_KEY"] = Path(xray_pub_path).read_text(encoding="utf-8").strip()
+    updates["XRAY_REALITY_PUBLIC_KEY"] = read_text_from_host_or_container(
+        xray_pub_path,
+        docker_bin=docker_bin,
+        container=xray_container,
+        description="XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH",
+    ).strip()
 
 if not updates.get("XRAY_REALITY_PUBLIC_KEY") and not (env.get("XRAY_REALITY_PUBLIC_KEY") or "").strip():
     raise SystemExit("sync-runtime-from-configs: set XRAY_REALITY_PUBLIC_KEY_SOURCE_PATH or XRAY_REALITY_PUBLIC_KEY")
