@@ -80,3 +80,17 @@ func TestLoadConfigPrefersPublicKeyFiles(t *testing.T) {
 		t.Fatalf("expected xray public key from env, got %q", cfg.XrayRealityPublicKey)
 	}
 }
+
+func TestLoadConfigPrefersXraySourceConfigPath(t *testing.T) {
+	t.Setenv("HTTP_ADDR", ":18081")
+	t.Setenv("XRAY_SOURCE_CONFIG_PATH", "/opt/amnezia/xray/server.json")
+	t.Setenv("XRAY_CONFIG_PATH", "/etc/xray/config.json")
+
+	cfg, err := LoadConfig("node-agent")
+	if err != nil {
+		t.Fatalf("LoadConfig(node-agent) returned error: %v", err)
+	}
+	if cfg.XrayConfigPath != "/opt/amnezia/xray/server.json" {
+		t.Fatalf("expected XRAY_SOURCE_CONFIG_PATH to be used, got %q", cfg.XrayConfigPath)
+	}
+}

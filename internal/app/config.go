@@ -132,7 +132,7 @@ func LoadConfig(serviceName string) (Config, error) {
 		AmneziaInterfaceName:    envOrDefault("AMNEZIA_INTERFACE_NAME", ""),
 		AmneziaPort:             firstNonEmpty(os.Getenv("AMNEZIA_PORT"), os.Getenv("AMNEZIA_LISTEN_PORT")),
 		XrayContainerName:       envOrDefault("XRAY_CONTAINER_NAME", ""),
-		XrayConfigPath:          envOrDefault("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
+		XrayConfigPath:          firstNonEmpty(os.Getenv("XRAY_SOURCE_CONFIG_PATH"), os.Getenv("XRAY_CONFIG_PATH"), "/etc/xray/config.json"),
 		XrayPublicHost:          envOrDefault("XRAY_PUBLIC_HOST", ""),
 		XrayRealityPort:         intFromEnv("XRAY_REALITY_PORT", 8443),
 		XrayRealityServerName:   envOrDefault("XRAY_REALITY_SERVER_NAME", "www.cloudflare.com"),
