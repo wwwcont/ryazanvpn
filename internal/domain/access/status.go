@@ -1,9 +1,10 @@
 package access
 
 const (
-	StatusPending   = "pending"
-	StatusActive    = "active"
-	StatusSuspended = "suspended"
-	StatusRevoked   = "revoked"
-	StatusError     = "error"
+	StatusPending             = "pending"
+	StatusActive              = "active"
+	StatusSuspended           = "suspended"
+	StatusSuspendedNonpayment = "suspended_nonpayment"
+	StatusRevoked             = "revoked"
+	StatusError               = "error"
 )

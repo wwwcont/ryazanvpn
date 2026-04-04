@@ -13,7 +13,7 @@ import (
 const (
 	LedgerInviteBonus      = "invite_bonus"
 	LedgerDailyCharge      = "daily_charge"
-	LedgerPayment          = "payment"
+	LedgerTopup            = "topup"
 	LedgerManualAdjustment = "manual_adjustment"
 )
 
@@ -26,7 +26,7 @@ func (s FinanceService) ApplyInviteBonus(ctx context.Context, userID string, inv
 }
 
 func (s FinanceService) AddPayment(ctx context.Context, userID string, amountKopecks int64, reference string) error {
-	return s.addLedgerEntry(ctx, userID, LedgerPayment, amountKopecks, reference, map[string]any{"source": "payment"})
+	return s.addLedgerEntry(ctx, userID, LedgerTopup, amountKopecks, reference, map[string]any{"source": "payment"})
 }
 
 func (s FinanceService) AddManualAdjustment(ctx context.Context, userID string, amountKopecks int64, reference string) error {
@@ -54,6 +54,9 @@ RETURNING balance_kopecks`, userID, amountKopecks).Scan(&next); err != nil {
 	if _, err := tx.Exec(ctx, `INSERT INTO user_ledger (user_id, operation_type, amount_kopecks, balance_after_kopecks, reference, metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, userID, op, amountKopecks, next, reference, string(rawMeta)); err != nil {
 		return err
 	}
+	if err := reconcileUserAccessStatusTx(ctx, tx, userID, next); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -70,7 +73,7 @@ func (w DailyChargeWorker) Run(ctx context.Context) {
 		interval = 1 * time.Hour
 	}
 	if w.DailyChargeKopecks <= 0 {
-		w.DailyChargeKopecks = 800
+		w.DailyChargeKopecks = 1000
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -89,9 +92,14 @@ func (w DailyChargeWorker) charge(ctx context.Context) error {
 	rows, err := w.PG.Query(ctx, `
 SELECT u.id::text
 FROM users u
-JOIN access_grants ag ON ag.user_id = u.id
-WHERE ag.status = 'active'
-  AND ag.expires_at > NOW()
+WHERE EXISTS (
+	SELECT 1
+	FROM devices d
+	JOIN device_accesses da ON da.device_id = d.id
+	WHERE d.user_id = u.id
+	  AND d.status = 'active'
+	  AND da.status IN ('active', 'suspended_nonpayment')
+)
   AND (u.last_charge_at IS NULL OR u.last_charge_at < CURRENT_DATE)
 GROUP BY u.id`)
 	if err != nil {
@@ -118,35 +126,53 @@ func (w DailyChargeWorker) chargeUser(ctx context.Context, userID string) error 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var current int64
-	if err := tx.QueryRow(ctx, `SELECT balance_kopecks FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current); err != nil {
+	var lastChargeAt *time.Time
+	if err := tx.QueryRow(ctx, `SELECT balance_kopecks, last_charge_at FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current, &lastChargeAt); err != nil {
 		return err
 	}
+	if lastChargeAt != nil {
+		nowDate := time.Now().UTC().Truncate(24 * time.Hour)
+		if lastChargeAt.UTC().Equal(nowDate) || lastChargeAt.UTC().After(nowDate) {
+			return tx.Commit(ctx)
+		}
+	}
 	next := current - w.DailyChargeKopecks
-	if _, err := tx.Exec(ctx, `UPDATE users SET balance_kopecks = $2, last_charge_at = CURRENT_DATE, status = CASE WHEN $2 <= 0 THEN 'blocked' ELSE status END, updated_at = NOW() WHERE id = $1`, userID, next); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE users SET balance_kopecks = $2, last_charge_at = CURRENT_DATE, updated_at = NOW() WHERE id = $1`, userID, next); err != nil {
 		return err
 	}
 	rawMeta := `{"kind":"daily_subscription_charge"}`
 	if _, err := tx.Exec(ctx, `INSERT INTO user_ledger (user_id, operation_type, amount_kopecks, balance_after_kopecks, reference, metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, userID, LedgerDailyCharge, -w.DailyChargeKopecks, next, "daily_charge", rawMeta); err != nil {
 		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := reconcileUserAccessStatusTx(ctx, tx, userID, next); err != nil {
 		return err
 	}
-	if next <= 0 {
-		accessRows, err := w.PG.Query(ctx, `SELECT da.id::text FROM device_accesses da JOIN devices d ON d.id = da.device_id WHERE d.user_id = $1 AND da.status = 'active'`, userID)
-		if err != nil {
+	return tx.Commit(ctx)
+}
+
+func reconcileUserAccessStatusTx(ctx context.Context, tx pgx.Tx, userID string, balance int64) error {
+	if balance > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE users SET status='active', updated_at=NOW() WHERE id=$1`, userID); err != nil {
 			return err
 		}
-		defer accessRows.Close()
-		for accessRows.Next() {
-			var accessID string
-			if err := accessRows.Scan(&accessID); err != nil {
-				return err
-			}
-			if err := w.RevokeAccess.Execute(ctx, RevokeDeviceAccessInput{AccessID: accessID}); err != nil {
-				return err
-			}
-		}
+		_, err := tx.Exec(ctx, `
+UPDATE device_accesses da
+SET status='active', updated_at=NOW()
+FROM devices d
+WHERE da.device_id=d.id
+  AND d.user_id=$1
+  AND da.status='suspended_nonpayment'`)
+		return err
 	}
-	return nil
+	if _, err := tx.Exec(ctx, `UPDATE users SET status='blocked_for_nonpayment', updated_at=NOW() WHERE id=$1`, userID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+UPDATE device_accesses da
+SET status='suspended_nonpayment', updated_at=NOW()
+FROM devices d
+WHERE da.device_id=d.id
+  AND d.user_id=$1
+  AND da.status='active'`)
+	return err
 }

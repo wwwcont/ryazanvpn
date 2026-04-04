@@ -77,7 +77,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", err)
 			return nil, err
 		}
-		if strings.EqualFold(u.Status, user.StatusBlocked) {
+		if strings.EqualFold(u.Status, user.StatusBlocked) || strings.EqualFold(u.Status, user.StatusBlockedForNonpayment) {
 			slog.Error("create_device_for_user.error", "user_id", in.UserID, "error", ErrInsufficientBalance)
 			return nil, ErrInsufficientBalance
 		}

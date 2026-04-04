@@ -22,7 +22,7 @@ func (r *UserRepository) WithTx(tx pgx.Tx) *UserRepository {
 
 func (r *UserRepository) List(ctx context.Context) ([]*user.User, error) {
 	const query = `
-SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at
+SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, balance_kopecks, last_charge_at, created_at, updated_at
 FROM users
 ORDER BY created_at DESC`
 
@@ -42,6 +42,8 @@ ORDER BY created_at DESC`
 			&item.FirstName,
 			&item.LastName,
 			&item.Status,
+			&item.BalanceKopecks,
+			&item.LastChargeAt,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
@@ -57,7 +59,7 @@ ORDER BY created_at DESC`
 
 func (r *UserRepository) GetByTelegramID(ctx context.Context, telegramID int64) (*user.User, error) {
 	const query = `
-SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at
+SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, balance_kopecks, last_charge_at, created_at, updated_at
 FROM users
 WHERE telegram_id = $1`
 
@@ -69,6 +71,8 @@ WHERE telegram_id = $1`
 		&out.FirstName,
 		&out.LastName,
 		&out.Status,
+		&out.BalanceKopecks,
+		&out.LastChargeAt,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	)
@@ -83,7 +87,7 @@ WHERE telegram_id = $1`
 
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*user.User, error) {
 	const query = `
-SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at
+SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, balance_kopecks, last_charge_at, created_at, updated_at
 FROM users
 WHERE LOWER(username) = LOWER($1)
 LIMIT 1`
@@ -96,6 +100,8 @@ LIMIT 1`
 		&out.FirstName,
 		&out.LastName,
 		&out.Status,
+		&out.BalanceKopecks,
+		&out.LastChargeAt,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	)
@@ -112,7 +118,7 @@ func (r *UserRepository) Create(ctx context.Context, in user.CreateParams) (*use
 	const query = `
 INSERT INTO users (telegram_id, username, first_name, last_name, status)
 VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), $5)
-RETURNING id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at`
+RETURNING id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, balance_kopecks, last_charge_at, created_at, updated_at`
 
 	var out user.User
 	err := r.q.QueryRow(ctx, query, in.TelegramID, in.Username, in.FirstName, in.LastName, in.Status).Scan(
@@ -122,6 +128,8 @@ RETURNING id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''
 		&out.FirstName,
 		&out.LastName,
 		&out.Status,
+		&out.BalanceKopecks,
+		&out.LastChargeAt,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	)
@@ -133,7 +141,7 @@ RETURNING id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*user.User, error) {
 	const query = `
-SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, created_at, updated_at
+SELECT id::text, telegram_id, COALESCE(username, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), status, balance_kopecks, last_charge_at, created_at, updated_at
 FROM users
 WHERE id = $1`
 
@@ -145,6 +153,8 @@ WHERE id = $1`
 		&out.FirstName,
 		&out.LastName,
 		&out.Status,
+		&out.BalanceKopecks,
+		&out.LastChargeAt,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	)

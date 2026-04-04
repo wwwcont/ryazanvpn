@@ -68,6 +68,18 @@ func TestActivateInviteCode_Success(t *testing.T) {
 	}
 }
 
+func TestActivateInviteCode_InviteBonus25000(t *testing.T) {
+	store := fakeActivateStore{}
+	fin := &fakeInviteFinance{}
+	uc := ActivateInviteCode{Store: &store, Now: func() time.Time { return time.Unix(100, 0).UTC() }, Finance: fin}
+	if err := uc.Execute(context.Background(), ActivateInviteCodeInput{UserID: "u1", Code: "1111"}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if fin.amount != 25_000 {
+		t.Fatalf("expected invite bonus 25000 kopecks, got %d", fin.amount)
+	}
+}
+
 func TestActivateInviteCode_RejectWhenUserHasActiveAccessGrant(t *testing.T) {
 	uc := ActivateInviteCode{Store: &fakeActivateStore{activeAccessGrant: true}, Now: func() time.Time { return time.Unix(100, 0) }}
 	err := uc.Execute(context.Background(), ActivateInviteCodeInput{UserID: "u1", Code: "1111"})
@@ -289,6 +301,15 @@ func (f *fakeInviteCodes) ListRecent(ctx context.Context, limit int) ([]*invitec
 type fakeActivateStore struct {
 	activeAccessGrant bool
 	accessGrants      *fakeAccessGrants
+}
+
+type fakeInviteFinance struct {
+	amount int64
+}
+
+func (f *fakeInviteFinance) ApplyInviteBonus(ctx context.Context, userID string, inviteCodeID string, amountKopecks int64) error {
+	f.amount = amountKopecks
+	return nil
 }
 
 func (f *fakeActivateStore) WithinTx(ctx context.Context, fn func(repos ActivateInviteCodeRepos) error) error {
