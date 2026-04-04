@@ -15,7 +15,12 @@ type PeerConsistencyWorker struct {
 	Nodes         NodeRepository
 	Accesses      DeviceAccessRepository
 	ClientFactory TrafficClientFactory
+	Reconciler    PeerConsistencyReconciler
 	PollInterval  time.Duration
+}
+
+type PeerConsistencyReconciler interface {
+	ReconcileMissingPeer(ctx context.Context, nodeID string, counter NodeTrafficCounter) (bool, error)
 }
 
 func (w PeerConsistencyWorker) Run(ctx context.Context) {
@@ -90,6 +95,7 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 					continue
 				}
 				w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "access_id", id, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
+				w.tryReconcileMissing(ctx, nodeID, rp)
 				continue
 			}
 			seenAccessIDs[id] = struct{}{}
@@ -98,10 +104,12 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 
 		if strings.TrimSpace(rp.AllowedIP) == "" {
 			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "public_key", rp.PeerPublicKey)
+			w.tryReconcileMissing(ctx, nodeID, rp)
 			continue
 		}
 		if matched := dbByIP[rp.AllowedIP]; matched == nil {
 			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
+			w.tryReconcileMissing(ctx, nodeID, rp)
 		} else {
 			seenAccessIDs[matched.ID] = struct{}{}
 		}
@@ -112,6 +120,20 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 			continue
 		}
 		w.logWarn("peer_consistency.runtime_missing", "node_id", nodeID, "access_id", p.ID, "assigned_ip", valuePtrOrDefault(p.AssignedIP, ""))
+	}
+}
+
+func (w PeerConsistencyWorker) tryReconcileMissing(ctx context.Context, nodeID string, counter NodeTrafficCounter) {
+	if w.Reconciler == nil {
+		return
+	}
+	ok, err := w.Reconciler.ReconcileMissingPeer(ctx, nodeID, counter)
+	if err != nil {
+		w.logErr("peer_consistency.reconcile_failed", err)
+		return
+	}
+	if ok {
+		w.logWarn("peer_consistency.reconciled_stale_peer", "node_id", nodeID, "access_id", strings.TrimSpace(counter.DeviceAccessID), "allowed_ip", strings.TrimSpace(counter.AllowedIP), "public_key", strings.TrimSpace(counter.PeerPublicKey))
 	}
 }
 

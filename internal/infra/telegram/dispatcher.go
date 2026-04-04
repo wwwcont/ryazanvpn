@@ -883,21 +883,22 @@ func (s *TelegramService) adminBalanceAdjust(ctx context.Context, chatID int64, 
 	}
 	amount, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || amount == 0 {
-		_ = s.Bot.SendMessage(ctx, chatID, "Некорректная сумма. Пример: @username +100 или @username -50", nil)
+		_ = s.Bot.SendMessage(ctx, chatID, "Некорректная сумма. Пример: @username +100 или @username -50 (в рублях).", nil)
 		return
 	}
+	amountKopecks := amount * 100
 	if s.Finance == nil {
 		_ = s.Bot.SendMessage(ctx, chatID, "Сервис баланса недоступен.", nil)
 		return
 	}
 	reference := fmt.Sprintf("tg_admin:%s", actorUserID)
-	if err := s.Finance.AddManualAdjustment(ctx, u.ID, amount, reference); err != nil {
+	if err := s.Finance.AddManualAdjustment(ctx, u.ID, amountKopecks, reference); err != nil {
 		s.logErr("admin balance adjust", err)
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось применить корректировку баланса.", nil)
 		return
 	}
-	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Баланс обновлён: user=%d @%s amount=%+d.", u.TelegramID, u.Username, amount), nil)
-	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.applied", map[string]any{"target_user_id": u.ID, "amount_kopecks": amount})
+	_ = s.Bot.SendMessage(ctx, chatID, fmt.Sprintf("Баланс обновлён: user=%d @%s amount=%+d ₽.", u.TelegramID, u.Username, amount), nil)
+	_ = s.logAudit(ctx, actorUserID, "telegram.admin.balance.adjust.applied", map[string]any{"target_user_id": u.ID, "amount_kopecks": amountKopecks, "amount_rub": amount})
 }
 
 func (s *TelegramService) createSingleCode(ctx context.Context, chatID int64, actorUserID string) {

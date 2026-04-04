@@ -229,6 +229,28 @@ func TestHandleGetConfig_FallbacksToWireguardWhenXrayUnavailable(t *testing.T) {
 	}
 }
 
+func TestAdminBalanceAdjust_ParsesRublesAndSendsKopecks(t *testing.T) {
+	bot := &fakeBot{}
+	fin := &fakeFinanceAdjust{}
+	svc := &TelegramService{
+		Bot:     bot,
+		Users:   &fakeUsersRepo{byUsername: map[string]*user.User{"alice": {ID: "u1", TelegramID: 123, Username: "alice"}}},
+		Finance: fin,
+	}
+
+	svc.adminBalanceAdjust(context.Background(), 42, "admin-1", "@alice -250 test")
+
+	if fin.lastUserID != "u1" {
+		t.Fatalf("unexpected user id: %q", fin.lastUserID)
+	}
+	if fin.lastAmount != -25_000 {
+		t.Fatalf("expected -250 rub converted to -25000 kopecks, got %d", fin.lastAmount)
+	}
+	if len(bot.messages) == 0 || !strings.Contains(bot.messages[0].text, "-250 ₽") {
+		t.Fatalf("expected confirmation in rubles, got %+v", bot.messages)
+	}
+}
+
 type fakeBot struct{ messages []sentMessage }
 
 type sentMessage struct {
@@ -257,6 +279,51 @@ type fakeRegister struct{ u *user.User }
 
 func (f fakeRegister) Execute(ctx context.Context, in app.RegisterTelegramUserInput) (*user.User, error) {
 	return f.u, nil
+}
+
+type fakeUsersRepo struct {
+	byUsername map[string]*user.User
+	byTelegram map[int64]*user.User
+}
+
+func (f *fakeUsersRepo) GetByTelegramID(ctx context.Context, telegramID int64) (*user.User, error) {
+	if u := f.byTelegram[telegramID]; u != nil {
+		return u, nil
+	}
+	return nil, user.ErrNotFound
+}
+func (f *fakeUsersRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {
+	if u := f.byUsername[username]; u != nil {
+		return u, nil
+	}
+	return nil, user.ErrNotFound
+}
+func (f *fakeUsersRepo) Create(ctx context.Context, in user.CreateParams) (*user.User, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeUsersRepo) GetByID(ctx context.Context, id string) (*user.User, error) {
+	for _, u := range f.byUsername {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	for _, u := range f.byTelegram {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, user.ErrNotFound
+}
+
+type fakeFinanceAdjust struct {
+	lastUserID string
+	lastAmount int64
+}
+
+func (f *fakeFinanceAdjust) AddManualAdjustment(ctx context.Context, userID string, amountKopecks int64, reference string) error {
+	f.lastUserID = userID
+	f.lastAmount = amountKopecks
+	return nil
 }
 
 type fakeActivate struct{}

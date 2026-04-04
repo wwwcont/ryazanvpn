@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wwwcont/ryazanvpn/internal/domain/access"
 	"github.com/wwwcont/ryazanvpn/internal/domain/traffic"
 )
+
+var errAccessNotResolved = errors.New("access not resolved by id or assigned ip")
 
 type TrafficClientFactory interface {
 	ForNode(agentBaseURL string) NodeTrafficClient
@@ -65,6 +68,10 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 		for _, c := range counters {
 			acc, err := w.resolveAccess(ctx, n.ID, c)
 			if err != nil {
+				if errors.Is(err, access.ErrNotFound) || errors.Is(err, errAccessNotResolved) {
+					w.logInfo("resolve access skipped", "node_id", n.ID, "access_id", c.DeviceAccessID, "allowed_ip", c.AllowedIP, "protocol", valueOrDefault(c.Protocol, "wireguard"))
+					continue
+				}
 				w.logErr("resolve access", err)
 				continue
 			}
@@ -145,7 +152,7 @@ func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string
 			return nil, ipErr
 		}
 	}
-	return nil, errors.New("access not resolved by id or assigned ip")
+	return nil, errAccessNotResolved
 }
 
 type trafficAccess struct {
@@ -157,4 +164,15 @@ func (w TrafficCollectorWorker) logErr(msg string, err error) {
 	if w.Logger != nil {
 		w.Logger.Error(msg, slog.Any("error", err))
 	}
+}
+
+func (w TrafficCollectorWorker) logInfo(msg string, kv ...string) {
+	if w.Logger == nil {
+		return
+	}
+	attrs := make([]any, 0, len(kv))
+	for i := 0; i+1 < len(kv); i += 2 {
+		attrs = append(attrs, slog.String(kv[i], kv[i+1]))
+	}
+	w.Logger.Info(msg, attrs...)
 }

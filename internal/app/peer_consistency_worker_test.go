@@ -81,6 +81,28 @@ func TestPeerConsistencyWorker_LogsStaleNodeReference(t *testing.T) {
 	}
 }
 
+func TestPeerConsistencyWorker_ReconcileMissingPeerPath(t *testing.T) {
+	repo := &pcNodeRepo{nodes: []*node.Node{{ID: "n1", AgentBaseURL: "http://n1"}}}
+	accessRepo := &pcAccessRepo{byNode: map[string][]*access.DeviceAccess{"n1": {}}}
+	logs := &pcLogCollector{}
+	reconciler := &pcReconciler{ok: true}
+	worker := PeerConsistencyWorker{
+		Logger:        slog.New(logs),
+		Nodes:         repo,
+		Accesses:      accessRepo,
+		ClientFactory: &pcFactory{items: []NodeTrafficCounter{{DeviceAccessID: "missing-access", AllowedIP: "10.0.0.30/32"}}},
+		Reconciler:    reconciler,
+	}
+
+	worker.check(context.Background())
+	if reconciler.calls != 1 {
+		t.Fatalf("expected reconciler to be called once, got %d", reconciler.calls)
+	}
+	if !logs.hasMessage("peer_consistency.reconciled_stale_peer") {
+		t.Fatal("expected reconciled stale peer log")
+	}
+}
+
 type pcNodeRepo struct{ nodes []*node.Node }
 
 func (r *pcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }
@@ -135,6 +157,16 @@ type pcTrafficClient struct{ items []NodeTrafficCounter }
 
 func (c pcTrafficClient) GetTrafficCounters(ctx context.Context) ([]NodeTrafficCounter, error) {
 	return c.items, nil
+}
+
+type pcReconciler struct {
+	ok    bool
+	calls int
+}
+
+func (r *pcReconciler) ReconcileMissingPeer(ctx context.Context, nodeID string, counter NodeTrafficCounter) (bool, error) {
+	r.calls++
+	return r.ok, nil
 }
 
 type pcLogCollector struct {
