@@ -4,16 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
 	LedgerInviteBonus      = "invite_bonus"
 	LedgerDailyCharge      = "daily_charge"
-	LedgerTopup            = "payment"
+	LedgerTopup            = "topup"
 	LedgerManualAdjustment = "manual_adjustment"
 )
 
@@ -40,23 +42,29 @@ func (s FinanceService) addLedgerEntry(ctx context.Context, userID string, op st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var next int64
+	var current int64
+	if err := tx.QueryRow(ctx, `SELECT balance_kopecks FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current); err != nil {
+		return err
+	}
+	next := current + amountKopecks
 	if err := tx.QueryRow(ctx, `
 UPDATE users
-SET balance_kopecks = balance_kopecks + $2,
+SET balance_kopecks = $2,
 	updated_at = NOW(),
-	status = CASE WHEN balance_kopecks + $2 > 0 THEN 'active' ELSE status END
+	status = CASE WHEN $2 > 0 THEN 'active' ELSE status END
 WHERE id = $1
-RETURNING balance_kopecks`, userID, amountKopecks).Scan(&next); err != nil {
+RETURNING balance_kopecks`, userID, next).Scan(&next); err != nil {
 		return err
 	}
 	rawMeta, _ := json.Marshal(metadata)
 	if _, err := tx.Exec(ctx, `INSERT INTO user_ledger (user_id, operation_type, amount_kopecks, balance_after_kopecks, reference, metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, userID, op, amountKopecks, next, reference, string(rawMeta)); err != nil {
 		return err
 	}
-	if err := reconcileUserAccessStatusTx(ctx, tx, userID, next); err != nil {
+	resumed, suspended, err := reconcileUserAccessStatusTx(ctx, tx, userID, next)
+	if err != nil {
 		return err
 	}
+	slog.Info("finance.balance.adjusted", "user_id", userID, "operation_type", op, "delta_kopecks", amountKopecks, "balance_before_kopecks", current, "balance_after_kopecks", next, "device_accesses_resumed", resumed, "device_accesses_suspended", suspended)
 	return tx.Commit(ctx)
 }
 
@@ -144,35 +152,41 @@ func (w DailyChargeWorker) chargeUser(ctx context.Context, userID string) error 
 	if _, err := tx.Exec(ctx, `INSERT INTO user_ledger (user_id, operation_type, amount_kopecks, balance_after_kopecks, reference, metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)`, userID, LedgerDailyCharge, -w.DailyChargeKopecks, next, "daily_charge", rawMeta); err != nil {
 		return err
 	}
-	if err := reconcileUserAccessStatusTx(ctx, tx, userID, next); err != nil {
+	resumed, suspended, err := reconcileUserAccessStatusTx(ctx, tx, userID, next)
+	if err != nil {
 		return err
 	}
+	slog.Info("finance.daily_charge.applied", "user_id", userID, "delta_kopecks", -w.DailyChargeKopecks, "balance_before_kopecks", current, "balance_after_kopecks", next, "device_accesses_resumed", resumed, "device_accesses_suspended", suspended)
 	return tx.Commit(ctx)
 }
 
-func reconcileUserAccessStatusTx(ctx context.Context, tx pgx.Tx, userID string, balance int64) error {
+type txExec interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+func reconcileUserAccessStatusTx(ctx context.Context, tx txExec, userID string, balance int64) (resumed int64, suspended int64, err error) {
 	if balance > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE users SET status='active', updated_at=NOW() WHERE id=$1`, userID); err != nil {
-			return err
+			return 0, 0, err
 		}
-		_, err := tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 UPDATE device_accesses da
 SET status='active', updated_at=NOW()
 FROM devices d
 WHERE da.device_id=d.id
   AND d.user_id=$1
-  AND da.status='suspended_nonpayment'`)
-		return err
+  AND da.status='suspended_nonpayment'`, userID)
+		return tag.RowsAffected(), 0, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE users SET status='blocked_for_nonpayment', updated_at=NOW() WHERE id=$1`, userID); err != nil {
-		return err
+		return 0, 0, err
 	}
-	_, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 UPDATE device_accesses da
 SET status='suspended_nonpayment', updated_at=NOW()
 FROM devices d
 WHERE da.device_id=d.id
   AND d.user_id=$1
-  AND da.status='active'`)
-	return err
+  AND da.status='active'`, userID)
+	return 0, tag.RowsAffected(), err
 }
