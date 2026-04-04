@@ -69,6 +69,10 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		now = uc.Now().UTC()
 	}
 
+	var bonusUserID string
+	var bonusInviteCodeID string
+	var bonusAmount int64
+
 	err := uc.Store.WithinTx(ctx, func(repos ActivateInviteCodeRepos) error {
 		slog.Info("activate_invite_code.lookup_invite.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 		u, err := repos.Users().GetByID(ctx, in.UserID)
@@ -132,9 +136,9 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 			return err
 		}
 		if uc.Finance != nil {
-			if err := uc.Finance.ApplyInviteBonus(ctx, u.ID, ic.ID, 25_000); err != nil {
-				return err
-			}
+			bonusUserID = u.ID
+			bonusInviteCodeID = ic.ID
+			bonusAmount = 25_000
 		}
 
 		updated, err := repos.InviteCodes().IncrementUsageAndMaybeExhaust(ctx, ic.ID)
@@ -173,6 +177,14 @@ func (uc ActivateInviteCode) Execute(ctx context.Context, in ActivateInviteCodeI
 		return err
 	}
 	slog.Info("activate_invite_code.commit.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
+	if uc.Finance != nil && bonusUserID != "" && bonusInviteCodeID != "" {
+		slog.Info("activate_invite_code.bonus.start", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "amount_kopecks", bonusAmount)...)
+		if err := uc.Finance.ApplyInviteBonus(ctx, bonusUserID, bonusInviteCodeID, bonusAmount); err != nil {
+			slog.Error("activate_invite_code.bonus.error", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)...)
+		} else {
+			slog.Info("activate_invite_code.bonus.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds(), "amount_kopecks", bonusAmount)...)
+		}
+	}
 	slog.Info("activate_invite_code.success", append(baseFields, "duration_ms", time.Since(startedAt).Milliseconds())...)
 	return nil
 }
