@@ -478,7 +478,8 @@ SELECT
 	d.id::text,
 	da.protocol,
 	d.public_key,
-	da.assigned_ip::text
+	da.assigned_ip::text,
+	da.preshared_key
 FROM device_accesses da
 JOIN devices d ON d.id=da.device_id
 JOIN users u ON u.id=d.user_id
@@ -494,7 +495,8 @@ WHERE da.vpn_node_id=$1
 			for rows.Next() {
 				var accessID, userID, deviceID, protocol, publicKey string
 				var assignedIP *string
-				if err := rows.Scan(&accessID, &userID, &deviceID, &protocol, &publicKey, &assignedIP); err != nil {
+				var presharedKey *string
+				if err := rows.Scan(&accessID, &userID, &deviceID, &protocol, &publicKey, &assignedIP, &presharedKey); err != nil {
 					respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 					return
 				}
@@ -506,6 +508,10 @@ WHERE da.vpn_node_id=$1
 				if strings.EqualFold(strings.TrimSpace(protocol), "xray") {
 					peerID = app.DeterministicXrayUUIDFromSeed(accessID)
 				}
+				endpointParams := map[string]any{}
+				if strings.EqualFold(strings.TrimSpace(protocol), "wireguard") && presharedKey != nil && strings.TrimSpace(*presharedKey) != "" {
+					endpointParams["preshared_key"] = strings.TrimSpace(*presharedKey)
+				}
 				items = append(items, map[string]any{
 					"access_id":            accessID,
 					"user_id":              userID,
@@ -514,7 +520,7 @@ WHERE da.vpn_node_id=$1
 					"peer_public_key":      peerID,
 					"preshared_key":        nil,
 					"assigned_ip":          assigned,
-					"endpoint_params":      map[string]any{},
+					"endpoint_params":      endpointParams,
 					"persistent_keepalive": 25,
 					"node_id":              nodeID,
 					"desired_state":        "present",

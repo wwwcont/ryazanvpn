@@ -15,6 +15,7 @@ type DeviceAccess struct {
 	Protocol            string
 	Status              string
 	AssignedIP          *string
+	PresharedKey        *string
 	ConfigBlobEncrypted []byte
 	GrantedAt           *time.Time
 	RevokedAt           *time.Time
@@ -36,9 +37,10 @@ type Repository interface {
 }
 
 type CreateParams struct {
-	DeviceID   string
-	VPNNodeID  string
-	Protocol   string
-	Status     string
-	AssignedIP *string
+	DeviceID     string
+	VPNNodeID    string
+	Protocol     string
+	Status       string
+	AssignedIP   *string
+	PresharedKey *string
 }

@@ -23,11 +23,11 @@ func (r *DeviceAccessRepository) WithTx(tx pgx.Tx) *DeviceAccessRepository {
 
 func (r *DeviceAccessRepository) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
 	const query = `
-INSERT INTO device_accesses (device_id, vpn_node_id, protocol, status, assigned_ip)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at`
+INSERT INTO device_accesses (device_id, vpn_node_id, protocol, status, assigned_ip, preshared_key)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at`
 
-	out, err := scanAccess(r.q.QueryRow(ctx, query, in.DeviceID, in.VPNNodeID, in.Protocol, in.Status, in.AssignedIP))
+	out, err := scanAccess(r.q.QueryRow(ctx, query, in.DeviceID, in.VPNNodeID, in.Protocol, in.Status, in.AssignedIP, in.PresharedKey))
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ RETURNING id::text, device_id::text, vpn_node_id::text, protocol, status, assign
 
 func (r *DeviceAccessRepository) GetByID(ctx context.Context, id string) (*access.DeviceAccess, error) {
 	const query = `
-SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
+SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
 FROM device_accesses
 WHERE id = $1`
 
@@ -132,7 +132,7 @@ WHERE id = $1`
 
 func (r *DeviceAccessRepository) GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*access.DeviceAccess, error) {
 	const query = `
-SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
+SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
 FROM device_accesses
 WHERE device_id = $1 AND status = 'active'
 ORDER BY created_at DESC`
@@ -159,7 +159,7 @@ ORDER BY created_at DESC`
 
 func (r *DeviceAccessRepository) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	const query = `
-SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
+SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
 FROM device_accesses
 WHERE vpn_node_id = $1 AND status = 'active' AND assigned_ip = $2
 ORDER BY created_at DESC
@@ -177,7 +177,7 @@ LIMIT 1`
 
 func (r *DeviceAccessRepository) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
 	const query = `
-SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
+SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at
 FROM device_accesses
 WHERE vpn_node_id = $1 AND status = 'active'
 ORDER BY created_at DESC`
@@ -213,6 +213,7 @@ func scanAccess(row pgx.Row) (*access.DeviceAccess, error) {
 		&out.Protocol,
 		&out.Status,
 		&out.AssignedIP,
+		&out.PresharedKey,
 		&out.ConfigBlobEncrypted,
 		&grantedAt,
 		&revokedAt,

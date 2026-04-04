@@ -285,24 +285,31 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 		return []map[string]any{{"error": err.Error()}}
 	}
 	desiredByAccess := make(map[string]struct {
-		Protocol      string
-		PeerPublicKey string
-		AssignedIP    string
-		Keepalive     int
+		Protocol       string
+		PeerPublicKey  string
+		AssignedIP     string
+		Keepalive      int
+		EndpointParams map[string]any
 	}, len(desired))
+	desiredFingerprints := make(map[string]struct{}, len(desired))
 	for _, d := range desired {
 		desiredByAccess[d.AccessID] = struct {
-			Protocol      string
-			PeerPublicKey string
-			AssignedIP    string
-			Keepalive     int
-		}{Protocol: d.Protocol, PeerPublicKey: d.PeerPublicKey, AssignedIP: d.AssignedIP, Keepalive: d.PersistentKeepalive}
+			Protocol       string
+			PeerPublicKey  string
+			AssignedIP     string
+			Keepalive      int
+			EndpointParams map[string]any
+		}{Protocol: d.Protocol, PeerPublicKey: d.PeerPublicKey, AssignedIP: d.AssignedIP, Keepalive: d.PersistentKeepalive, EndpointParams: d.EndpointParams}
+		desiredFingerprints[peerFingerprint(d.Protocol, d.PeerPublicKey, d.AssignedIP)] = struct{}{}
 	}
 	runtimeByAccess := make(map[string]runtime.PeerStat, len(stats))
+	orphanRuntimePeers := make([]runtime.PeerStat, 0, len(stats))
 	for _, s := range stats {
 		if strings.TrimSpace(s.DeviceAccessID) != "" {
 			runtimeByAccess[s.DeviceAccessID] = s
+			continue
 		}
+		orphanRuntimePeers = append(orphanRuntimePeers, s)
 	}
 	results := make([]map[string]any, 0)
 	for accessID, d := range desiredByAccess {
@@ -319,6 +326,7 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 			PeerPublicKey:  d.PeerPublicKey,
 			AssignedIP:     d.AssignedIP,
 			Keepalive:      d.Keepalive,
+			EndpointMeta:   endpointParamsToStringMap(d.EndpointParams),
 		})
 		if err != nil {
 			logger.Error("reconcile apply failed", slog.String("access_id", accessID), slog.Any("error", err))
@@ -355,7 +363,69 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 		logger.Info("reconcile revoke peer", slog.String("access_id", accessID))
 		results = append(results, map[string]any{"operation_id": opID, "access_id": accessID, "action": "revoke", "status": "ok"})
 	}
+	for _, cur := range orphanRuntimePeers {
+		if _, wanted := desiredFingerprints[peerFingerprint(cur.Protocol, cur.PeerPublicKey, cur.AllowedIP)]; wanted {
+			continue
+		}
+		protocol := strings.TrimSpace(cur.Protocol)
+		if protocol == "" {
+			continue
+		}
+		opID := fmt.Sprintf("reconcile-revoke-orphan-%d", time.Now().UTC().UnixNano())
+		_, err := rt.RevokePeer(ctx, runtime.PeerOperationRequest{
+			OperationID:    opID,
+			DeviceAccessID: valueOrFallback(strings.TrimSpace(cur.DeviceAccessID), "orphan"),
+			Protocol:       protocol,
+			PeerPublicKey:  strings.TrimSpace(cur.PeerPublicKey),
+			AssignedIP:     strings.TrimSpace(cur.AllowedIP),
+			Keepalive:      25,
+		})
+		if err != nil {
+			logger.Error("reconcile revoke orphan failed", slog.String("protocol", protocol), slog.String("peer_public_key", cur.PeerPublicKey), slog.String("allowed_ip", cur.AllowedIP), slog.Any("error", err))
+			results = append(results, map[string]any{"operation_id": opID, "action": "revoke_orphan", "status": "error", "error": err.Error(), "protocol": protocol, "peer_public_key": cur.PeerPublicKey})
+			continue
+		}
+		logger.Info("reconcile revoke orphan peer", slog.String("protocol", protocol), slog.String("peer_public_key", cur.PeerPublicKey), slog.String("allowed_ip", cur.AllowedIP))
+		results = append(results, map[string]any{"operation_id": opID, "action": "revoke_orphan", "status": "ok", "protocol": protocol, "peer_public_key": cur.PeerPublicKey})
+	}
 	return results
+}
+
+func peerFingerprint(protocol, peerPublicKey, allowedIP string) string {
+	return strings.ToLower(strings.TrimSpace(protocol)) + "|" + strings.TrimSpace(peerPublicKey) + "|" + normalizeIPForCompare(allowedIP)
+}
+
+func normalizeIPForCompare(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if i := strings.IndexByte(raw, '/'); i > 0 {
+		raw = raw[:i]
+	}
+	return raw
+}
+
+func valueOrFallback(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+
+func endpointParamsToStringMap(in map[string]any) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, error) {

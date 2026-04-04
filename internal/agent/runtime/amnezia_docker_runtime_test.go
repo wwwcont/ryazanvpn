@@ -78,6 +78,53 @@ func TestAmneziaDockerRuntime_ApplyPeerBuildsCommand(t *testing.T) {
 	}
 }
 
+func TestAmneziaDockerRuntime_ApplyPeer_ReusesCachedPresharedKey(t *testing.T) {
+	exec := &amneziaFakeExecutor{}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{DockerBinaryPath: "/usr/bin/docker", ContainerName: "amnezia-awg2", InterfaceName: "awg0", CommandTimeout: time.Second}, exec)
+	ctx := context.Background()
+
+	_, err := rt.ApplyPeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-1",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+		AssignedIP:     "10.0.0.9",
+		Keepalive:      25,
+		EndpointMeta:   map[string]string{"preshared_key": "cachedPSK123+/="},
+	})
+	if err != nil {
+		t.Fatalf("unexpected first apply error: %v", err)
+	}
+	firstSetCall := exec.calls[len(exec.calls)-2]
+	if got := strings.Join(firstSetCall.Args, " "); !strings.Contains(got, "preshared-key /tmp/ryazanvpn-psk-") {
+		t.Fatalf("expected first apply to include psk file, got %v", firstSetCall.Args)
+	}
+
+	_, err = rt.RevokePeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-revoke",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+	})
+	if err != nil {
+		t.Fatalf("unexpected revoke error: %v", err)
+	}
+
+	_, err = rt.ApplyPeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-2",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+		AssignedIP:     "10.0.0.9",
+		Keepalive:      25,
+		EndpointMeta:   map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected second apply error: %v", err)
+	}
+	secondSetCall := exec.calls[len(exec.calls)-2]
+	if got := strings.Join(secondSetCall.Args, " "); !strings.Contains(got, "preshared-key /tmp/ryazanvpn-psk-") {
+		t.Fatalf("expected cached psk to be reused on second apply, got %v", secondSetCall.Args)
+	}
+}
+
 func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 	exec := &amneziaFakeExecutor{}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{DockerBinaryPath: "/usr/bin/docker", ContainerName: "amnezia-awg2", InterfaceName: "awg0", CommandTimeout: time.Second}, exec)
@@ -270,6 +317,34 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	}
 	if !strings.Contains(stagedConfig, `"id": "11111111-1111-1111-1111-111111111111"`) {
 		t.Fatalf("expected xray client id to be added by tag match, got: %s", stagedConfig)
+	}
+}
+
+func TestAmneziaDockerRuntime_ListPeerStats_IncludesXrayClientsFromConfig(t *testing.T) {
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: "awg0\tpriv\tpub\t51820\toff\n"},
+			{ExitCode: 0, Stdout: `{"inbounds":[{"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111"}],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443"}}}]}`},
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		ContainerName:    "amnezia-awg2",
+		InterfaceName:    "awg0",
+		XrayContainer:    "amnezia-xray",
+		XrayConfigPath:   "/opt/amnezia/xray/server.json",
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	stats, err := rt.ListPeerStats(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("expected one xray stat, got %d (%+v)", len(stats), stats)
+	}
+	if stats[0].Protocol != "xray" || stats[0].PeerPublicKey != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("unexpected xray stat: %+v", stats[0])
 	}
 }
 

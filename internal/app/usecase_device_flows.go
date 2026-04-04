@@ -156,11 +156,12 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 	slog.Info("device created", "user_id", in.UserID, "device_id", createdDevice.ID, "node_id", selectedNode.ID)
 
 	createdAccess, err := uc.Accesses.Create(ctx, access.CreateParams{
-		DeviceID:   createdDevice.ID,
-		VPNNodeID:  selectedNode.ID,
-		Protocol:   "wireguard",
-		Status:     access.StatusPending,
-		AssignedIP: &assignedIP,
+		DeviceID:     createdDevice.ID,
+		VPNNodeID:    selectedNode.ID,
+		Protocol:     "wireguard",
+		Status:       access.StatusPending,
+		AssignedIP:   &assignedIP,
+		PresharedKey: &presharedKey,
 	})
 	if err != nil {
 		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
