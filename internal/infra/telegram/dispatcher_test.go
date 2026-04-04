@@ -325,6 +325,11 @@ func (f *fakeFinanceAdjust) AddManualAdjustment(ctx context.Context, userID stri
 	f.lastAmount = amountKopecks
 	return nil
 }
+func (f *fakeFinanceAdjust) SetBalance(ctx context.Context, userID string, targetBalanceKopecks int64, reference string) error {
+	f.lastUserID = userID
+	f.lastAmount = targetBalanceKopecks
+	return nil
+}
 
 type fakeActivate struct{}
 
@@ -477,6 +482,9 @@ func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string)
 		return out, nil
 	}
 	return []*access.DeviceAccess{}, nil
+}
+func (f *fakeAccesses) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
 }
 func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound

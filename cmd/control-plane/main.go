@@ -218,6 +218,9 @@ func main() {
 		AgentHMACSecret:   cfg.AgentHMACSecret,
 		NodeRegisterToken: cfg.NodeRegistrationToken,
 		Finance:           financeSvc,
+		NodeLinkCapacityBPS: cfg.NodeLinkCapacityBPS,
+		NodeThroughputSampleStep: cfg.NodeThroughputSampleStep,
+		NodeThroughputRetention: cfg.NodeThroughputRetention,
 	})
 
 	srv := &http.Server{
@@ -249,7 +252,9 @@ func main() {
 		Accesses:      accessRepo,
 		Traffic:       trafficRepo,
 		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
-		PollInterval:  1 * time.Minute,
+		PollInterval:  cfg.NodeThroughputSampleStep,
+		SampleStep:    cfg.NodeThroughputSampleStep,
+		SampleRetention: cfg.NodeThroughputRetention,
 	}.Run(workerCtx)
 
 	go app.PeerConsistencyWorker{

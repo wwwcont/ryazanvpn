@@ -93,6 +93,9 @@ type Config struct {
 	NodeCapacity               int
 	DailyChargeInterval        time.Duration
 	DailyChargeKopecks         int64
+	NodeLinkCapacityBPS        int64
+	NodeThroughputSampleStep   time.Duration
+	NodeThroughputRetention    time.Duration
 }
 
 // LoadConfig reads and validates service configuration from env.
@@ -179,6 +182,9 @@ func LoadConfig(serviceName string) (Config, error) {
 		NodeCapacity:            intFromEnv("NODE_CAPACITY", 0),
 		DailyChargeInterval:     durationFromEnv("DAILY_CHARGE_INTERVAL", 1*time.Hour),
 		DailyChargeKopecks:      int64(intFromEnv("DAILY_CHARGE_KOPECKS", 1000)),
+		NodeLinkCapacityBPS:     int64FromEnv("NODE_LINK_CAPACITY_BPS", 1_000_000_000),
+		NodeThroughputSampleStep: durationFromEnv("NODE_THROUGHPUT_SAMPLE_STEP", 1*time.Minute),
+		NodeThroughputRetention:  durationFromEnv("NODE_THROUGHPUT_RETENTION", 48*time.Hour),
 	}
 
 	cfg.applyKeyFileOverrides()
@@ -241,6 +247,18 @@ func intFromEnv(key string, fallback int) int {
 		return fallback
 	}
 	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func int64FromEnv(key string, fallback int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		return fallback
 	}

@@ -33,6 +33,7 @@ type Repository interface {
 	ClearConfigBlobEncrypted(ctx context.Context, id string) error
 	GetActiveByDeviceID(ctx context.Context, deviceID string) ([]*DeviceAccess, error)
 	GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*DeviceAccess, error)
+	GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*DeviceAccess, error)
 	ListActiveByNodeID(ctx context.Context, nodeID string) ([]*DeviceAccess, error)
 }
 

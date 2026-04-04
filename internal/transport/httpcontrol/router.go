@@ -67,6 +67,9 @@ type Options struct {
 	AgentHMACSecret   string
 	NodeRegisterToken string
 	Finance           *app.FinanceService
+	NodeLinkCapacityBPS int64
+	NodeThroughputSampleStep time.Duration
+	NodeThroughputRetention time.Duration
 }
 
 var inviteCodePattern = regexp.MustCompile(`^\d{4}$`)
@@ -153,6 +156,56 @@ func NewRouter(opts Options) http.Handler {
 			if capacity > 0 {
 				nodeLoad = float64(load) / float64(capacity)
 			}
+			var currentBps float64
+			var medianBps1h float64
+			var p95Bps1h float64
+			var peakBps24h float64
+			var peersTotal int
+			var peersResolved int
+			_ = opts.PG.QueryRow(r.Context(), `
+SELECT COALESCE((
+    SELECT throughput_bps
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0),
+COALESCE((
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '1 hour'
+), 0),
+COALESCE((
+    SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '1 hour'
+), 0),
+COALESCE((
+    SELECT MAX(throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '24 hour'
+), 0),
+COALESCE((
+    SELECT peers_total
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0),
+COALESCE((
+    SELECT peers_resolved
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0)`, id).Scan(&currentBps, &medianBps1h, &p95Bps1h, &peakBps24h, &peersTotal, &peersResolved)
+			util := 0.0
+			if opts.NodeLinkCapacityBPS > 0 {
+				util = (currentBps / float64(opts.NodeLinkCapacityBPS)) * 100
+			}
 			items = append(items, map[string]any{
 				"id":             id,
 				"name":           name,
@@ -163,9 +216,28 @@ func NewRouter(opts Options) http.Handler {
 				"agent_base_url": agentURL,
 				"vpn_endpoint":   endpoint,
 				"last_seen_at":   lastSeen,
+				"current_bps_estimate": currentBps,
+				"median_bps_1h": medianBps1h,
+				"p95_bps_1h": p95Bps1h,
+				"peak_bps_24h": peakBps24h,
+				"runtime_peers_total": peersTotal,
+				"runtime_peers_resolved": peersResolved,
+				"link_utilization_percent": util,
 			})
 		}
-		respondJSON(w, http.StatusOK, map[string]any{"items": items})
+		step := opts.NodeThroughputSampleStep
+		if step <= 0 {
+			step = time.Minute
+		}
+		retention := opts.NodeThroughputRetention
+		if retention <= 0 {
+			retention = 48 * time.Hour
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"items": items,
+			"sample_step_seconds": int64(step.Seconds()),
+			"retention_seconds": int64(retention.Seconds()),
+		})
 	})
 
 	r.Get("/api/v1/metrics/users/{id}", func(w http.ResponseWriter, r *http.Request) {

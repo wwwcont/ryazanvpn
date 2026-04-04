@@ -143,6 +143,45 @@ WHERE d.user_id = $1 AND tud.usage_date >= $2::date`
 	return out, err
 }
 
+func (r *TrafficRepository) AddNodeThroughputSample(ctx context.Context, in traffic.AddNodeThroughputSampleParams) error {
+	if in.NodeID == "" {
+		return nil
+	}
+	step := in.StepSec
+	if step <= 0 {
+		step = 60
+	}
+	window := in.WindowSec
+	if window <= 0 {
+		window = step
+	}
+	rx := max64(in.RXDelta, 0)
+	tx := max64(in.TXDelta, 0)
+	total := rx + tx
+	bps := float64(total*8) / float64(window)
+	const query = `
+INSERT INTO node_throughput_samples (vpn_node_id, captured_at, window_sec, rx_bytes, tx_bytes, total_bytes, throughput_bps, peers_total, peers_resolved)
+VALUES ($1, $2, $3::bigint, $4::bigint, $5::bigint, $6::bigint, $7::double precision, $8::integer, $9::integer)
+ON CONFLICT (vpn_node_id, captured_at)
+DO UPDATE SET
+	window_sec = EXCLUDED.window_sec,
+	rx_bytes = EXCLUDED.rx_bytes,
+	tx_bytes = EXCLUDED.tx_bytes,
+	total_bytes = EXCLUDED.total_bytes,
+	throughput_bps = EXCLUDED.throughput_bps,
+	peers_total = EXCLUDED.peers_total,
+	peers_resolved = EXCLUDED.peers_resolved`
+	capturedAt := in.CapturedAt.UTC()
+	capturedAt = capturedAt.Truncate(time.Duration(step) * time.Second)
+	_, err := r.q.Exec(ctx, query, in.NodeID, capturedAt, window, rx, tx, total, bps, in.PeerCount, in.ResolvedPeers)
+	return err
+}
+
+func (r *TrafficRepository) CleanupNodeThroughputSamples(ctx context.Context, olderThan time.Time) error {
+	_, err := r.q.Exec(ctx, `DELETE FROM node_throughput_samples WHERE captured_at < $1`, olderThan.UTC())
+	return err
+}
+
 func max64(a, b int64) int64 {
 	if a > b {
 		return a

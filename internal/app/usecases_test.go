@@ -492,6 +492,9 @@ func (f *fakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) (
 func (f *fakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
 }
+func (f *fakeAccess) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
 func (f *fakeAccess) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
 }

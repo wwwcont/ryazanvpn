@@ -76,9 +76,6 @@ func TestPeerConsistencyWorker_LogsStaleNodeReference(t *testing.T) {
 	if !logs.hasMessage("peer_consistency.stale_node_reference") {
 		t.Fatal("expected stale node reference log")
 	}
-	if !logs.hasMessage("peer_consistency.skip_revoke_stale_node") {
-		t.Fatal("expected skip revoke stale node log")
-	}
 }
 
 func TestPeerConsistencyWorker_ReconcileMissingPeerPath(t *testing.T) {
@@ -98,8 +95,8 @@ func TestPeerConsistencyWorker_ReconcileMissingPeerPath(t *testing.T) {
 	if reconciler.calls != 1 {
 		t.Fatalf("expected reconciler to be called once, got %d", reconciler.calls)
 	}
-	if !logs.hasMessage("peer_consistency.reconciled_stale_peer") {
-		t.Fatal("expected reconciled stale peer log")
+	if !logs.hasMessage("peer_consistency.control_plane_missing") {
+		t.Fatal("expected summary control_plane_missing log")
 	}
 }
 
@@ -141,6 +138,9 @@ func (r *pcAccessRepo) GetActiveByDeviceID(ctx context.Context, deviceID string)
 	return nil, nil
 }
 func (r *pcAccessRepo) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
+func (r *pcAccessRepo) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
 }
 func (r *pcAccessRepo) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {

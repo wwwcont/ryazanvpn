@@ -124,7 +124,7 @@ WHERE id = $1`
 func (r *DeviceRepository) Revoke(ctx context.Context, id string) error {
 	const query = `
 UPDATE devices
-SET status = 'revoked', updated_at = NOW()
+SET status = 'deleted', updated_at = NOW()
 WHERE id = $1`
 
 	res, err := r.q.Exec(ctx, query, id)

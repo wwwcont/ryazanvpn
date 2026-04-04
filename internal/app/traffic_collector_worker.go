@@ -25,6 +25,8 @@ type TrafficCollectorWorker struct {
 	Traffic       TrafficRepository
 	ClientFactory TrafficClientFactory
 	PollInterval  time.Duration
+	SampleStep    time.Duration
+	SampleRetention time.Duration
 	Now           func() time.Time
 }
 
@@ -65,6 +67,9 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 			w.logErr("get traffic counters", err)
 			continue
 		}
+		var nodeRXDelta int64
+		var nodeTXDelta int64
+		resolvedPeers := 0
 		for _, c := range counters {
 			acc, err := w.resolveAccess(ctx, n.ID, c)
 			if err != nil {
@@ -75,6 +80,7 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 				w.logErr("resolve access", err)
 				continue
 			}
+			resolvedPeers++
 			prev, err := w.Traffic.GetLastSnapshotByDeviceID(ctx, acc.DeviceID, now)
 			if err != nil {
 				w.logErr("get previous snapshot", err)
@@ -117,19 +123,52 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 			}); err != nil {
 				w.logErr("add daily usage delta", err)
 			}
+			nodeRXDelta += rxDelta
+			nodeTXDelta += txDelta
 		}
+		stepSec := int64(w.SampleStep.Seconds())
+		if stepSec <= 0 {
+			stepSec = 60
+		}
+		windowSec := int64(w.PollInterval.Seconds())
+		if windowSec <= 0 {
+			windowSec = stepSec
+		}
+		if err := w.Traffic.AddNodeThroughputSample(ctx, traffic.AddNodeThroughputSampleParams{
+			NodeID:        n.ID,
+			CapturedAt:    now,
+			StepSec:       stepSec,
+			WindowSec:     windowSec,
+			RXDelta:       nodeRXDelta,
+			TXDelta:       nodeTXDelta,
+			PeerCount:     len(counters),
+			ResolvedPeers: resolvedPeers,
+		}); err != nil {
+			w.logErr("add node throughput sample", err)
+		}
+	}
+	w.cleanupOldNodeSamples(ctx, now)
+}
+
+func (w TrafficCollectorWorker) cleanupOldNodeSamples(ctx context.Context, now time.Time) {
+	retention := w.SampleRetention
+	if retention <= 0 {
+		retention = 48 * time.Hour
+	}
+	if err := w.Traffic.CleanupNodeThroughputSamples(ctx, now.Add(-retention)); err != nil {
+		w.logErr("cleanup node throughput samples", err)
 	}
 }
 
 func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string, c NodeTrafficCounter) (*trafficAccess, error) {
-	accessID := strings.TrimSpace(c.DeviceAccessID)
-	if accessID != "" && !strings.EqualFold(accessID, "(none)") {
-		acc, err := w.Accesses.GetByID(ctx, accessID)
-		if err == nil && acc != nil {
-			return &trafficAccess{DeviceID: acc.DeviceID, AccessID: acc.ID}, nil
+	publicKey := strings.TrimSpace(c.PeerPublicKey)
+	if publicKey != "" && !strings.EqualFold(publicKey, "(none)") {
+		accByKey, keyErr := w.Accesses.GetActiveByNodeAndPublicKey(ctx, nodeID, publicKey)
+		if keyErr == nil && accByKey != nil {
+			return &trafficAccess{DeviceID: accByKey.DeviceID, AccessID: accByKey.ID}, nil
 		}
-		if err != nil {
-			return nil, err
+		if keyErr != nil && !errors.Is(keyErr, access.ErrNotFound) {
+			return nil, keyErr
 		}
 	}
 
@@ -148,8 +187,18 @@ func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string
 		if ipErr == nil && accByIP != nil {
 			return &trafficAccess{DeviceID: accByIP.DeviceID, AccessID: accByIP.ID}, nil
 		}
-		if ipErr != nil {
+		if ipErr != nil && !errors.Is(ipErr, access.ErrNotFound) {
 			return nil, ipErr
+		}
+	}
+	accessID := strings.TrimSpace(c.DeviceAccessID)
+	if accessID != "" && !strings.EqualFold(accessID, "(none)") {
+		acc, err := w.Accesses.GetByID(ctx, accessID)
+		if err == nil && acc != nil {
+			return &trafficAccess{DeviceID: acc.DeviceID, AccessID: acc.ID}, nil
+		}
+		if err != nil && !errors.Is(err, access.ErrNotFound) {
+			return nil, err
 		}
 	}
 	return nil, errAccessNotResolved

@@ -27,6 +27,12 @@ func TestTrafficCollectorWorker_CollectsDeltaAndHandlesReset(t *testing.T) {
 	if len(trafficRepo.deltas) != 1 || trafficRepo.deltas[0].RXDelta != 100 || trafficRepo.deltas[0].TXDelta != 50 {
 		t.Fatalf("unexpected first delta: %+v", trafficRepo.deltas)
 	}
+	if len(trafficRepo.nodeSamples) != 1 || trafficRepo.nodeSamples[0].RXDelta != 100 || trafficRepo.nodeSamples[0].TXDelta != 50 {
+		t.Fatalf("unexpected first node sample: %+v", trafficRepo.nodeSamples)
+	}
+	if trafficRepo.cleanupCalls == 0 {
+		t.Fatal("expected cleanup call after collect")
+	}
 
 	now = now.Add(1 * time.Minute)
 	w.collect(context.Background())
@@ -35,6 +41,9 @@ func TestTrafficCollectorWorker_CollectsDeltaAndHandlesReset(t *testing.T) {
 	}
 	if trafficRepo.deltas[1].RXDelta != 20 || trafficRepo.deltas[1].TXDelta != 10 {
 		t.Fatalf("expected reset-aware delta=20/10, got %+v", trafficRepo.deltas[1])
+	}
+	if len(trafficRepo.nodeSamples) != 2 || trafficRepo.nodeSamples[1].RXDelta != 20 || trafficRepo.nodeSamples[1].TXDelta != 10 {
+		t.Fatalf("unexpected second node sample: %+v", trafficRepo.nodeSamples)
 	}
 }
 
@@ -73,6 +82,27 @@ func TestTrafficCollectorWorker_ResolveAccess_ByAssignedIPWithoutCIDR(t *testing
 	}
 }
 
+func TestTrafficCollectorWorker_ResolveAccess_ByPublicKey(t *testing.T) {
+	w := TrafficCollectorWorker{
+		Accesses: &tcAccessRepo{
+			entries: map[string]*access.DeviceAccess{},
+			byNodePK: map[string]*access.DeviceAccess{
+				"n1|pk-1": {ID: "a-pk", DeviceID: "d-pk"},
+			},
+		},
+	}
+	got, err := w.resolveAccess(context.Background(), "n1", NodeTrafficCounter{
+		PeerPublicKey: "pk-1",
+		AllowedIP:     "",
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got == nil || got.AccessID != "a-pk" {
+		t.Fatalf("unexpected resolved access: %+v", got)
+	}
+}
+
 type tcNodeRepo struct{ nodes []*node.Node }
 
 func (r *tcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }
@@ -85,6 +115,7 @@ func (r *tcNodeRepo) UpdateLoad(ctx context.Context, id string, currentLoad int)
 type tcAccessRepo struct {
 	entries  map[string]*access.DeviceAccess
 	byNodeIP map[string]*access.DeviceAccess
+	byNodePK map[string]*access.DeviceAccess
 }
 
 func (r *tcAccessRepo) Create(ctx context.Context, in access.CreateParams) (*access.DeviceAccess, error) {
@@ -117,6 +148,16 @@ func (r *tcAccessRepo) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID 
 	}
 	return item, nil
 }
+func (r *tcAccessRepo) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	if r.byNodePK == nil {
+		return nil, access.ErrNotFound
+	}
+	item, ok := r.byNodePK[nodeID+"|"+publicKey]
+	if !ok {
+		return nil, access.ErrNotFound
+	}
+	return item, nil
+}
 func (r *tcAccessRepo) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
 	return nil, nil
 }
@@ -124,6 +165,8 @@ func (r *tcAccessRepo) ListActiveByNodeID(ctx context.Context, nodeID string) ([
 type tcTrafficRepo struct {
 	snapshots []*traffic.DeviceTrafficSnapshot
 	deltas    []traffic.AddDailyUsageDeltaParams
+	nodeSamples []traffic.AddNodeThroughputSampleParams
+	cleanupCalls int
 }
 
 func (r *tcTrafficRepo) CreateSnapshot(ctx context.Context, in traffic.CreateSnapshotParams) (*traffic.DeviceTrafficSnapshot, error) {
@@ -154,6 +197,14 @@ func (r *tcTrafficRepo) GetUserTrafficTotal(ctx context.Context, userID string) 
 }
 func (r *tcTrafficRepo) GetUserTrafficLastNDays(ctx context.Context, userID string, days int, now time.Time) (int64, error) {
 	return 0, nil
+}
+func (r *tcTrafficRepo) AddNodeThroughputSample(ctx context.Context, in traffic.AddNodeThroughputSampleParams) error {
+	r.nodeSamples = append(r.nodeSamples, in)
+	return nil
+}
+func (r *tcTrafficRepo) CleanupNodeThroughputSamples(ctx context.Context, olderThan time.Time) error {
+	r.cleanupCalls++
+	return nil
 }
 
 type tcFactory struct{ counters [][]NodeTrafficCounter }
