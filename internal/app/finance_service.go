@@ -49,9 +49,9 @@ func (s FinanceService) addLedgerEntry(ctx context.Context, userID string, op st
 	next := current + amountKopecks
 	if err := tx.QueryRow(ctx, `
 UPDATE users
-SET balance_kopecks = $2,
+SET balance_kopecks = $2::bigint,
 	updated_at = NOW(),
-	status = CASE WHEN $2 > 0 THEN 'active' ELSE status END
+	status = CASE WHEN $2::bigint > 0 THEN 'active' ELSE status END
 WHERE id = $1
 RETURNING balance_kopecks`, userID, next).Scan(&next); err != nil {
 		return err
