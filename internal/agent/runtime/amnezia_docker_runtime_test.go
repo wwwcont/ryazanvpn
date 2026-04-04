@@ -103,6 +103,7 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	var stagedConfig string
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
+			{ExitCode: 0},
 			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
@@ -120,8 +121,8 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 		DockerBinaryPath: "/usr/bin/docker",
 		ContainerName:    "amnezia-awg2",
 		InterfaceName:    "awg0",
-		XrayContainer:    "ryazanvpn-xray",
-		XrayConfigPath:   "/etc/xray/config.json",
+		XrayContainer:    "amnezia-xray",
+		XrayConfigPath:   "/opt/amnezia/xray/server.json",
 		WorkDir:          workDir,
 		CommandTimeout:   time.Second,
 	}, exec)
@@ -136,17 +137,20 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientAndRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(exec.calls) != 3 {
-		t.Fatalf("expected 3 docker calls, got %d", len(exec.calls))
+	if len(exec.calls) != 4 {
+		t.Fatalf("expected 4 docker calls, got %d", len(exec.calls))
 	}
-	if got := strings.Join(exec.calls[0].Args, " "); !strings.Contains(got, "exec ryazanvpn-xray cat /etc/xray/config.json") {
-		t.Fatalf("unexpected read args: %v", exec.calls[0].Args)
+	if got := strings.Join(exec.calls[0].Args, " "); !strings.Contains(got, "exec amnezia-xray sh -c test -f \"$1\" -- /opt/amnezia/xray/server.json") {
+		t.Fatalf("unexpected source file check args: %v", exec.calls[0].Args)
 	}
-	if got := strings.Join(exec.calls[2].Args, " "); !strings.Contains(got, "restart ryazanvpn-xray") {
-		t.Fatalf("unexpected restart args: %v", exec.calls[2].Args)
+	if got := strings.Join(exec.calls[1].Args, " "); !strings.Contains(got, "exec amnezia-xray cat /opt/amnezia/xray/server.json") {
+		t.Fatalf("unexpected read args: %v", exec.calls[1].Args)
 	}
-	cpArgs := exec.calls[1].Args
-	if len(cpArgs) < 3 || cpArgs[0] != "cp" || cpArgs[2] != "ryazanvpn-xray:/etc/xray/config.json" {
+	if got := strings.Join(exec.calls[3].Args, " "); !strings.Contains(got, "restart amnezia-xray") {
+		t.Fatalf("unexpected restart args: %v", exec.calls[3].Args)
+	}
+	cpArgs := exec.calls[2].Args
+	if len(cpArgs) < 3 || cpArgs[0] != "cp" || cpArgs[2] != "amnezia-xray:/opt/amnezia/xray/server.json" {
 		t.Fatalf("unexpected cp args: %v", cpArgs)
 	}
 	if stagedConfig == "" {
@@ -197,6 +201,7 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayRejectsInvalidUUIDBeforeWrite(t *test
 func TestAmneziaDockerRuntime_ApplyPeerXrayValidationFailsBeforeWrite(t *testing.T) {
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
+			{ExitCode: 0},
 			{ExitCode: 0, Stdout: `{"inbounds":[{"protocol":"vless","settings":{"clients":[]},"streamSettings":{"security":"reality"}}]}`},
 		},
 	}
@@ -220,8 +225,8 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayValidationFailsBeforeWrite(t *testing
 	if !strings.Contains(err.Error(), ".port is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(exec.calls) != 1 {
-		t.Fatalf("expected only read call before failure, got %d", len(exec.calls))
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected source-file check + read call before failure, got %d", len(exec.calls))
 	}
 }
 
@@ -231,6 +236,7 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	var stagedConfig string
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
+			{ExitCode: 0},
 			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
@@ -264,5 +270,84 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	}
 	if !strings.Contains(stagedConfig, `"id": "11111111-1111-1111-1111-111111111111"`) {
 		t.Fatalf("expected xray client id to be added by tag match, got: %s", stagedConfig)
+	}
+}
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayFailsWhenSourceConfigMissing(t *testing.T) {
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 1},
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		XrayContainer:    "amnezia-xray",
+		XrayConfigPath:   "/opt/amnezia/xray/server.json",
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-missing",
+		DeviceAccessID: "da-missing",
+		Protocol:       "xray",
+		PeerPublicKey:  "11111111-1111-1111-1111-111111111111",
+		AssignedIP:     "10.0.0.9/32",
+	})
+	if err == nil {
+		t.Fatal("expected missing source config error")
+	}
+	if !strings.Contains(err.Error(), "source config file is missing") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("expected only source-file check call, got %d", len(exec.calls))
+	}
+}
+
+func TestAmneziaDockerRuntime_RevokePeerXrayRemovesClientAndRestarts(t *testing.T) {
+	workDir := t.TempDir()
+	config := `{"inbounds":[{"port":443,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111"},{"id":"22222222-2222-2222-2222-222222222222"}],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443"}}}]}`
+	var stagedConfig string
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: config},
+			{ExitCode: 0},
+			{ExitCode: 0},
+		},
+		onRun: func(req shell.ExecRequest) {
+			if len(req.Args) >= 3 && req.Args[0] == "cp" {
+				raw, err := os.ReadFile(req.Args[1])
+				if err == nil {
+					stagedConfig = string(raw)
+				}
+			}
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath: "/usr/bin/docker",
+		XrayContainer:    "amnezia-xray",
+		XrayConfigPath:   "/opt/amnezia/xray/server.json",
+		WorkDir:          workDir,
+		CommandTimeout:   time.Second,
+	}, exec)
+
+	_, err := rt.RevokePeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-revoke-xray",
+		DeviceAccessID: "da-x",
+		Protocol:       "xray",
+		PeerPublicKey:  "11111111-1111-1111-1111-111111111111",
+		AssignedIP:     "10.0.0.5",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(exec.calls) != 3 {
+		t.Fatalf("expected read/cp/restart docker calls, got %d", len(exec.calls))
+	}
+	if strings.Contains(stagedConfig, `"11111111-1111-1111-1111-111111111111"`) {
+		t.Fatalf("expected removed xray client id, got: %s", stagedConfig)
+	}
+	if !strings.Contains(stagedConfig, `"22222222-2222-2222-2222-222222222222"`) {
+		t.Fatalf("expected other clients to remain, got: %s", stagedConfig)
 	}
 }

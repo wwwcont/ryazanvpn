@@ -149,7 +149,7 @@ func TestSendHealthLink_WhenXrayConfigEmpty_ShowsConfigNotReady(t *testing.T) {
 	if len(bot.messages) == 0 {
 		t.Fatal("expected bot message")
 	}
-	if !strings.Contains(bot.messages[len(bot.messages)-1].text, "Health-конфиг ещё не готов") {
+	if !strings.Contains(bot.messages[len(bot.messages)-1].text, "Health-конфиг пока недоступен") {
 		t.Fatalf("expected config-not-ready message, got %+v", bot.messages[len(bot.messages)-1])
 	}
 }
@@ -211,11 +211,18 @@ func TestHandleGetConfig_FallbacksToWireguardWhenXrayUnavailable(t *testing.T) {
 	svc.handleGetConfig(context.Background(), 100, "u1")
 
 	foundDoc := false
+	foundExplicitXrayFailure := false
 	for _, m := range bot.messages {
+		if strings.Contains(m.text, "Health (Xray) не применился") {
+			foundExplicitXrayFailure = true
+		}
 		if strings.Contains(m.text, "AmneziaWG/WireGuard") {
 			foundDoc = true
 			break
 		}
+	}
+	if !foundExplicitXrayFailure {
+		t.Fatalf("expected explicit xray failure message before wireguard fallback, got %+v", bot.messages)
 	}
 	if !foundDoc {
 		t.Fatalf("expected wireguard document fallback, got %+v", bot.messages)

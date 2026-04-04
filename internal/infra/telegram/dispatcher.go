@@ -515,9 +515,21 @@ func (s *TelegramService) handleInviteCode(ctx context.Context, chatID, telegram
 			return
 		}
 		s.logInfo("telegram.activate_invite.success", "telegram_user_id", telegramID, "chat_id", chatID, "invite_code", code, "user_id", userID)
-		_ = s.Bot.SendMessage(ctx, chatID, "Код активирован ✅ Начислено 250 ₽.", backMainMenu())
 		if s.Users != nil {
 			if u, err := s.Users.GetByID(ctx, userID); err == nil && u != nil {
+				if u.BalanceKopecks <= 0 && s.Finance != nil {
+					repairRef := fmt.Sprintf("invite_bonus_repair:%s:%s", code, u.ID)
+					if fixErr := s.Finance.AddManualAdjustment(ctx, u.ID, 25_000, repairRef); fixErr != nil {
+						s.logErr("invite bonus repair failed", fixErr)
+					} else if refreshed, rErr := s.Users.GetByID(ctx, userID); rErr == nil && refreshed != nil {
+						u = refreshed
+					}
+				}
+				if u.BalanceKopecks > 0 {
+					_ = s.Bot.SendMessage(ctx, chatID, "Код активирован ✅ Начисление подтверждено.", backMainMenu())
+				} else {
+					_ = s.Bot.SendMessage(ctx, chatID, "Код активирован ✅, но баланс пока не обновился. Сообщите администратору.", backMainMenu())
+				}
 				s.sendBalance(ctx, chatID, u)
 			}
 		}
@@ -720,6 +732,7 @@ func (s *TelegramService) handleGetConfig(ctx context.Context, chatID int64, use
 	xrayDelivered := s.trySendHealthLink(ctx, chatID, userID)
 	if !xrayDelivered {
 		s.logInfo("telegram.config_flow.partial_failure", "chat_id", chatID, "user_id", userID, "protocol", "xray")
+		_ = s.Bot.SendMessage(ctx, chatID, "⚠️ Health (Xray) не применился на ноде, поэтому выдаю Speed (WireGuard).", nil)
 		dw, acc, wErr := s.resolveProtocolAccess(ctx, userID, "wireguard")
 		if wErr != nil {
 			s.sendErrorReplyMessage(chatID, "Не удалось подготовить ни Health, ни Speed конфиг. Попробуйте позже.", nil, "user_id", userID)
@@ -761,6 +774,11 @@ func (s *TelegramService) sendHelp(ctx context.Context, chatID int64) {
 }
 
 func (s *TelegramService) sendBalance(ctx context.Context, chatID int64, u *user.User) {
+	if u != nil && s.Users != nil {
+		if fresh, err := s.Users.GetByID(ctx, u.ID); err == nil && fresh != nil {
+			u = fresh
+		}
+	}
 	statusText := "Активен"
 	if u.Status == user.StatusBlockedForNonpayment {
 		statusText = "Приостановлен из-за нулевого баланса"
@@ -1364,9 +1382,6 @@ func (s *TelegramService) resolveActiveAccessIDByProtocol(ctx context.Context, u
 			continue
 		}
 		if len(item.ConfigBlobEncrypted) == 0 {
-			if strings.EqualFold(strings.TrimSpace(protocol), "xray") {
-				return item.ID, nil
-			}
 			s.logInfo("telegram.config_blob.empty", "user_id", userID, "access_id", item.ID, "protocol", protocol, "action", "skip_broken_access")
 			continue
 		}

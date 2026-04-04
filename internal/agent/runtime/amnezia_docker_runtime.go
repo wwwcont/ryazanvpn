@@ -171,7 +171,9 @@ func (r *AmneziaDockerRuntime) RevokePeer(ctx context.Context, req PeerOperation
 		return OperationResult{}, errors.New("operation_id, device_access_id and peer_public_key are required")
 	}
 	if strings.EqualFold(strings.TrimSpace(req.Protocol), "xray") {
-		r.log("runtime.amnezia_docker.revoke_peer.xray.skipped", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID))
+		if err := r.revokeXrayClient(ctx, req); err != nil {
+			return OperationResult{}, err
+		}
 		return OperationResult{OperationID: req.OperationID, Applied: true, Idempotent: false}, nil
 	}
 
@@ -422,9 +424,32 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 	}
 	configPath := strings.TrimSpace(r.cfg.XrayConfigPath)
 	if configPath == "" {
-		configPath = "/etc/xray/config.json"
+		return errors.New("xray config path is empty")
 	}
-	r.log("xray.client.add.start", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.String("uuid", uuid))
+	r.log("xray.client.add.start",
+		slog.String("operation_id", req.OperationID),
+		slog.String("device_access_id", req.DeviceAccessID),
+		slog.String("uuid", uuid),
+		slog.String("container", r.cfg.XrayContainer),
+		slog.String("config_path", configPath),
+	)
+	existsRes, err := r.exec.Run(ctx, shell.ExecRequest{
+		Bin:     r.cfg.DockerBinaryPath,
+		Args:    []string{"exec", r.cfg.XrayContainer, "sh", "-c", "test -f \"$1\"", "--", configPath},
+		Timeout: r.commandTimeout(),
+	})
+	if err != nil {
+		r.log("xray.config.source_file.check.error", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer), slog.String("path", configPath), slog.String("error", err.Error()))
+		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	fileExists := existsRes.ExitCode == 0
+	r.log("xray.config.source_file.check", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer), slog.String("path", configPath), slog.Bool("exists", fileExists))
+	if !fileExists {
+		err := fmt.Errorf("xray source config file is missing: container=%s path=%s", r.cfg.XrayContainer, configPath)
+		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
 	out, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.XrayContainer, "cat", configPath}, Timeout: r.commandTimeout()})
 	if err != nil {
 		r.log("xray.client.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
@@ -447,6 +472,8 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		return err
 	}
 	updated := false
+	clientsBefore := 0
+	clientsAfter := 0
 	for i := range inbounds {
 		inbound, ok := inbounds[i].(map[string]any)
 		if !ok {
@@ -465,6 +492,7 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		if !ok {
 			clients = []any{}
 		}
+		clientsBefore += len(clients)
 		exists := false
 		for _, rawClient := range clients {
 			c, ok := rawClient.(map[string]any)
@@ -476,17 +504,19 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 				break
 			}
 		}
-			if !exists {
-				clients = append(clients, map[string]any{
-					"id":   uuid,
-					"flow": detectXrayClientFlow(clients),
-				})
-				settings["clients"] = clients
-				inbounds[i] = inbound
-				updated = true
-			}
+		if !exists {
+			clients = append(clients, map[string]any{
+				"id":   uuid,
+				"flow": detectXrayClientFlow(clients),
+			})
+			settings["clients"] = clients
+			inbounds[i] = inbound
+			updated = true
 		}
+		clientsAfter += len(clients)
+	}
 	cfg["inbounds"] = inbounds
+	r.log("xray.config.clients.count", slog.String("operation_id", req.OperationID), slog.Int("before", clientsBefore), slog.Int("after", clientsAfter))
 	if !updated {
 		r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
 		return nil
@@ -529,6 +559,101 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 	}
 	r.log("xray.config.reload.success", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer))
 	r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", false))
+	return nil
+}
+
+func (r *AmneziaDockerRuntime) revokeXrayClient(ctx context.Context, req PeerOperationRequest) error {
+	uuid, err := normalizeXrayUUID(req.PeerPublicKey)
+	if err != nil {
+		r.log("xray.client.revoke.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	if strings.TrimSpace(r.cfg.XrayContainer) == "" {
+		return errors.New("xray container is empty")
+	}
+	configPath := strings.TrimSpace(r.cfg.XrayConfigPath)
+	if configPath == "" {
+		return errors.New("xray config path is empty")
+	}
+	r.log("xray.client.revoke.start", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.String("uuid", uuid), slog.String("container", r.cfg.XrayContainer), slog.String("config_path", configPath))
+	out, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.XrayContainer, "cat", configPath}, Timeout: r.commandTimeout()})
+	if err != nil {
+		return err
+	}
+	if out.ExitCode != 0 {
+		return fmt.Errorf("read xray config failed with exit_code=%d", out.ExitCode)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(out.Stdout), &cfg); err != nil {
+		return err
+	}
+	inbounds, ok := cfg["inbounds"].([]any)
+	if !ok {
+		return errors.New("xray config inbounds is missing or invalid")
+	}
+	updated := false
+	for i := range inbounds {
+		inbound, ok := inbounds[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		tag := strings.TrimSpace(asString(inbound["tag"]))
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") && !strings.EqualFold(tag, "vless-reality") {
+			continue
+		}
+		settings, ok := inbound["settings"].(map[string]any)
+		if !ok {
+			continue
+		}
+		clients, ok := settings["clients"].([]any)
+		if !ok {
+			continue
+		}
+		filtered := make([]any, 0, len(clients))
+		for _, rawClient := range clients {
+			c, ok := rawClient.(map[string]any)
+			if !ok {
+				filtered = append(filtered, rawClient)
+				continue
+			}
+			id := strings.TrimSpace(asString(c["id"]))
+			if strings.EqualFold(id, uuid) {
+				updated = true
+				continue
+			}
+			filtered = append(filtered, rawClient)
+		}
+		settings["clients"] = filtered
+		inbound["settings"] = settings
+		inbounds[i] = inbound
+	}
+	if !updated {
+		r.log("xray.client.revoke.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
+		return nil
+	}
+	cfg["inbounds"] = inbounds
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath, err := r.writeLocalTemp(raw)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	if res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"cp", tmpPath, r.cfg.XrayContainer + ":" + configPath}, Timeout: r.commandTimeout()}); err != nil || res.ExitCode != 0 {
+		if err == nil {
+			err = fmt.Errorf("docker cp xray config failed with exit_code=%d", res.ExitCode)
+		}
+		return err
+	}
+	if res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"restart", r.cfg.XrayContainer}, Timeout: r.commandTimeout()}); err != nil || res.ExitCode != 0 {
+		if err == nil {
+			err = fmt.Errorf("xray restart failed with exit_code=%d", res.ExitCode)
+		}
+		return err
+	}
+	r.log("xray.client.revoke.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", false))
 	return nil
 }
 

@@ -26,14 +26,14 @@ func (t *testRuntime) ListPeerStats(ctx context.Context) ([]runtime.PeerStat, er
 }
 func (t *testRuntime) Health(ctx context.Context) error { return nil }
 
-func TestReconcileRuntime_SkipsRevokeForUnknownAccessWithID(t *testing.T) {
+func TestReconcileRuntime_RevokesUnknownAccessWithID(t *testing.T) {
 	rt := &testRuntime{stats: []runtime.PeerStat{{DeviceAccessID: "stale-access", Protocol: "wireguard", AllowedIP: "10.0.0.2/32"}}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	results := reconcileRuntime(context.Background(), logger, rt, nil)
-	if rt.revokeCalls != 0 {
-		t.Fatalf("expected zero revoke calls, got %d", rt.revokeCalls)
+	if rt.revokeCalls != 1 {
+		t.Fatalf("expected one revoke call, got %d", rt.revokeCalls)
 	}
-	if len(results) == 0 || results[0]["status"] != "skipped" {
-		t.Fatalf("expected skipped result, got %#v", results)
+	if len(results) == 0 || results[0]["status"] != "ok" {
+		t.Fatalf("expected successful revoke result, got %#v", results)
 	}
 }

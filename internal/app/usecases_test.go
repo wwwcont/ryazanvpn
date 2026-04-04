@@ -225,6 +225,28 @@ func TestRevokeDeviceAccess_Confirmed(t *testing.T) {
 	}
 }
 
+func TestRevokeDeviceAccess_XrayUsesDeterministicUUIDAsPeerPublicKey(t *testing.T) {
+	accessRepo := &fakeAccess{byID: &access.DeviceAccess{ID: "ax1", DeviceID: "d1", VPNNodeID: "n1", Protocol: "xray"}}
+	opRepo := &fakeOps{created: &operation.NodeOperation{ID: "op1"}}
+	uc := RevokeDeviceAccess{Accesses: accessRepo, Operations: opRepo, AuditLogs: &fakeAudit{}, Tokens: &fakeTokens{}}
+
+	if err := uc.Execute(context.Background(), RevokeDeviceAccessInput{AccessID: "ax1"}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if opRepo.lastCreate == nil {
+		t.Fatal("expected revoke operation payload")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(opRepo.lastCreate.PayloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	got, _ := payload["peer_public_key"].(string)
+	want := DeterministicXrayUUIDFromSeed("ax1")
+	if got != want {
+		t.Fatalf("unexpected xray peer_public_key: got=%q want=%q", got, want)
+	}
+}
+
 func TestListUserDevices(t *testing.T) {
 	repo := &fakeDevices{list: []*device.Device{{ID: "d1"}, {ID: "d2"}}}
 	uc := ListUserDevices{Devices: repo}

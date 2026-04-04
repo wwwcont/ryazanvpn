@@ -332,12 +332,6 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 		if _, wanted := desiredByAccess[accessID]; wanted {
 			continue
 		}
-		if strings.TrimSpace(accessID) != "" {
-			logger.Warn("peer_consistency.stale_node_reference", slog.String("access_id", accessID), slog.String("runtime_allowed_ip", cur.AllowedIP))
-			logger.Warn("peer_consistency.skip_revoke_stale_node", slog.String("access_id", accessID))
-			results = append(results, map[string]any{"access_id": accessID, "action": "revoke", "status": "skipped", "reason": "stale_node_reference"})
-			continue
-		}
 		protocol := strings.TrimSpace(cur.Protocol)
 		if protocol == "" {
 			logger.Error("reconcile revoke skipped: runtime peer protocol is empty", slog.String("access_id", accessID))

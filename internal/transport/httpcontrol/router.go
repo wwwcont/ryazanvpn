@@ -502,12 +502,16 @@ WHERE da.vpn_node_id=$1
 				if assignedIP != nil {
 					assigned = *assignedIP
 				}
+				peerID := publicKey
+				if strings.EqualFold(strings.TrimSpace(protocol), "xray") {
+					peerID = app.DeterministicXrayUUIDFromSeed(accessID)
+				}
 				items = append(items, map[string]any{
 					"access_id":            accessID,
 					"user_id":              userID,
 					"device_id":            deviceID,
 					"protocol":             protocol,
-					"peer_public_key":      publicKey,
+					"peer_public_key":      peerID,
 					"preshared_key":        nil,
 					"assigned_ip":          assigned,
 					"endpoint_params":      map[string]any{},

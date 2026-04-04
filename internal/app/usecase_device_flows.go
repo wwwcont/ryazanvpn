@@ -178,7 +178,7 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 		slog.Error("create_device_for_user.error", "user_id", in.UserID, "device_id", createdDevice.ID, "error", err)
 		return nil, err
 	}
-	xrayUserUUID := deterministicUUIDFromSeed(createdXrayAccess.ID)
+	xrayUserUUID := DeterministicXrayUUIDFromSeed(createdXrayAccess.ID)
 
 	payload, _ := json.Marshal(map[string]any{
 		"device_id":     createdDevice.ID,
@@ -384,7 +384,9 @@ func (uc RevokeDeviceAccess) Execute(ctx context.Context, in RevokeDeviceAccessI
 	}
 
 	peerPublicKey := ""
-	if uc.Devices != nil {
+	if strings.EqualFold(strings.TrimSpace(accessEntry.Protocol), "xray") {
+		peerPublicKey = DeterministicXrayUUIDFromSeed(accessEntry.ID)
+	} else if uc.Devices != nil {
 		if d, dErr := uc.Devices.GetByID(ctx, accessEntry.DeviceID); dErr == nil && d != nil {
 			peerPublicKey = d.PublicKey
 		}
@@ -468,7 +470,7 @@ func encodeBase64(v []byte) string {
 	return base64.StdEncoding.EncodeToString(v)
 }
 
-func deterministicUUIDFromSeed(seed string) string {
+func DeterministicXrayUUIDFromSeed(seed string) string {
 	hash := hashToken(seed)
 	if len(hash) < 32 {
 		hash = hash + strings.Repeat("0", 32-len(hash))
