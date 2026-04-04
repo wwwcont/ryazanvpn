@@ -241,6 +241,79 @@ func (r *AmneziaDockerRuntime) ListPeerStats(ctx context.Context) ([]PeerStat, e
 			stats[i].DeviceAccessID = s.DeviceAccessID
 		}
 	}
+	xrayStats, xrayErr := r.listXrayClientStats(ctx)
+	if xrayErr != nil {
+		r.log("xray.client.stats.error", slog.String("error", xrayErr.Error()))
+		return stats, nil
+	}
+	stats = append(stats, xrayStats...)
+	return stats, nil
+}
+
+func (r *AmneziaDockerRuntime) listXrayClientStats(ctx context.Context) ([]PeerStat, error) {
+	if strings.TrimSpace(r.cfg.XrayContainer) == "" || strings.TrimSpace(r.cfg.XrayConfigPath) == "" {
+		return nil, nil
+	}
+	out, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.XrayContainer, "cat", r.cfg.XrayConfigPath}, Timeout: r.commandTimeout()})
+	if err != nil {
+		return nil, err
+	}
+	if out.ExitCode != 0 {
+		return nil, fmt.Errorf("read xray config failed with exit_code=%d", out.ExitCode)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(out.Stdout), &cfg); err != nil {
+		return nil, err
+	}
+	inbounds, ok := cfg["inbounds"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	stats := make([]PeerStat, 0)
+	seen := make(map[string]struct{})
+	for _, rawInbound := range inbounds {
+		inbound, ok := rawInbound.(map[string]any)
+		if !ok {
+			continue
+		}
+		tag := strings.TrimSpace(asString(inbound["tag"]))
+		if !strings.EqualFold(strings.TrimSpace(asString(inbound["protocol"])), "vless") && !strings.EqualFold(tag, "vless-reality") {
+			continue
+		}
+		settings, ok := inbound["settings"].(map[string]any)
+		if !ok {
+			continue
+		}
+		clients, ok := settings["clients"].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawClient := range clients {
+			client, ok := rawClient.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := strings.TrimSpace(asString(client["id"]))
+			if id == "" {
+				continue
+			}
+			id = strings.ToLower(id)
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			accessID := ""
+			if peer, ok := r.peersByKey[id]; ok {
+				accessID = peer.DeviceAccessID
+			}
+			stats = append(stats, PeerStat{
+				DeviceAccessID: accessID,
+				Protocol:       "xray",
+				PeerPublicKey:  id,
+				AllowedIP:      "",
+			})
+		}
+	}
 	return stats, nil
 }
 
@@ -518,6 +591,9 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 	cfg["inbounds"] = inbounds
 	r.log("xray.config.clients.count", slog.String("operation_id", req.OperationID), slog.Int("before", clientsBefore), slog.Int("after", clientsAfter))
 	if !updated {
+		r.mu.Lock()
+		r.peersByKey[uuid] = PeerState{DeviceAccessID: req.DeviceAccessID, Protocol: "xray", PeerPublicKey: uuid, UpdatedAt: time.Now().UTC()}
+		r.mu.Unlock()
 		r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
 		return nil
 	}
@@ -558,6 +634,9 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		return err
 	}
 	r.log("xray.config.reload.success", slog.String("operation_id", req.OperationID), slog.String("container", r.cfg.XrayContainer))
+	r.mu.Lock()
+	r.peersByKey[uuid] = PeerState{DeviceAccessID: req.DeviceAccessID, Protocol: "xray", PeerPublicKey: uuid, UpdatedAt: time.Now().UTC()}
+	r.mu.Unlock()
 	r.log("xray.client.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", false))
 	return nil
 }
@@ -628,6 +707,9 @@ func (r *AmneziaDockerRuntime) revokeXrayClient(ctx context.Context, req PeerOpe
 		inbounds[i] = inbound
 	}
 	if !updated {
+		r.mu.Lock()
+		delete(r.peersByKey, uuid)
+		r.mu.Unlock()
 		r.log("xray.client.revoke.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
 		return nil
 	}
@@ -653,6 +735,9 @@ func (r *AmneziaDockerRuntime) revokeXrayClient(ctx context.Context, req PeerOpe
 		}
 		return err
 	}
+	r.mu.Lock()
+	delete(r.peersByKey, uuid)
+	r.mu.Unlock()
 	r.log("xray.client.revoke.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", false))
 	return nil
 }

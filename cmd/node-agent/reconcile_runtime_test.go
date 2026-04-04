@@ -37,3 +37,35 @@ func TestReconcileRuntime_RevokesUnknownAccessWithID(t *testing.T) {
 		t.Fatalf("expected successful revoke result, got %#v", results)
 	}
 }
+
+func TestReconcileRuntime_RevokesOrphanRuntimePeerWithoutAccessID(t *testing.T) {
+	rt := &testRuntime{stats: []runtime.PeerStat{{Protocol: "wireguard", PeerPublicKey: "pk-orphan", AllowedIP: "10.0.0.88/32"}}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	results := reconcileRuntime(context.Background(), logger, rt, nil)
+	if rt.revokeCalls != 1 {
+		t.Fatalf("expected one orphan revoke call, got %d", rt.revokeCalls)
+	}
+	if len(results) == 0 || results[0]["status"] != "ok" {
+		t.Fatalf("expected successful orphan revoke result, got %#v", results)
+	}
+}
+
+func TestReconcileRuntime_DoesNotRevokeOrphanWhenPeerPresentInDesiredByFingerprint(t *testing.T) {
+	rt := &testRuntime{stats: []runtime.PeerStat{{Protocol: "xray", PeerPublicKey: "11111111-1111-1111-1111-111111111111", AllowedIP: ""}}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	desired := []struct {
+		AccessID            string         `json:"access_id"`
+		Protocol            string         `json:"protocol"`
+		PeerPublicKey       string         `json:"peer_public_key"`
+		AssignedIP          string         `json:"assigned_ip"`
+		PersistentKeepalive int            `json:"persistent_keepalive"`
+		EndpointParams      map[string]any `json:"endpoint_params"`
+	}{
+		{AccessID: "access-x", Protocol: "xray", PeerPublicKey: "11111111-1111-1111-1111-111111111111", AssignedIP: ""},
+	}
+
+	_ = reconcileRuntime(context.Background(), logger, rt, desired)
+	if rt.revokeCalls != 0 {
+		t.Fatalf("did not expect revoke for desired xray orphan, got %d", rt.revokeCalls)
+	}
+}
