@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/traffic"
@@ -112,17 +115,37 @@ func (w TrafficCollectorWorker) collect(ctx context.Context) {
 }
 
 func (w TrafficCollectorWorker) resolveAccess(ctx context.Context, nodeID string, c NodeTrafficCounter) (*trafficAccess, error) {
-	acc, err := w.Accesses.GetByID(ctx, c.DeviceAccessID)
-	if err == nil && acc != nil {
-		return &trafficAccess{DeviceID: acc.DeviceID, AccessID: acc.ID}, nil
+	accessID := strings.TrimSpace(c.DeviceAccessID)
+	if accessID != "" && !strings.EqualFold(accessID, "(none)") {
+		acc, err := w.Accesses.GetByID(ctx, accessID)
+		if err == nil && acc != nil {
+			return &trafficAccess{DeviceID: acc.DeviceID, AccessID: acc.ID}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	if c.AllowedIP != "" {
-		accByIP, ipErr := w.Accesses.GetActiveByNodeAndAssignedIP(ctx, nodeID, c.AllowedIP)
+
+	allowedIP := strings.TrimSpace(c.AllowedIP)
+	if i := strings.IndexByte(allowedIP, '/'); i > 0 {
+		allowedIP = allowedIP[:i]
+	}
+	if strings.EqualFold(allowedIP, "(none)") {
+		allowedIP = ""
+	}
+	if allowedIP != "" {
+		if _, parseErr := netip.ParseAddr(allowedIP); parseErr != nil {
+			return nil, parseErr
+		}
+		accByIP, ipErr := w.Accesses.GetActiveByNodeAndAssignedIP(ctx, nodeID, allowedIP)
 		if ipErr == nil && accByIP != nil {
 			return &trafficAccess{DeviceID: accByIP.DeviceID, AccessID: accByIP.ID}, nil
 		}
+		if ipErr != nil {
+			return nil, ipErr
+		}
 	}
-	return nil, err
+	return nil, errors.New("access not resolved by id or assigned ip")
 }
 
 type trafficAccess struct {
