@@ -285,19 +285,21 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 		return []map[string]any{{"error": err.Error()}}
 	}
 	desiredByAccess := make(map[string]struct {
-		Protocol      string
-		PeerPublicKey string
-		AssignedIP    string
-		Keepalive     int
+		Protocol       string
+		PeerPublicKey  string
+		AssignedIP     string
+		Keepalive      int
+		EndpointParams map[string]any
 	}, len(desired))
 	desiredFingerprints := make(map[string]struct{}, len(desired))
 	for _, d := range desired {
 		desiredByAccess[d.AccessID] = struct {
-			Protocol      string
-			PeerPublicKey string
-			AssignedIP    string
-			Keepalive     int
-		}{Protocol: d.Protocol, PeerPublicKey: d.PeerPublicKey, AssignedIP: d.AssignedIP, Keepalive: d.PersistentKeepalive}
+			Protocol       string
+			PeerPublicKey  string
+			AssignedIP     string
+			Keepalive      int
+			EndpointParams map[string]any
+		}{Protocol: d.Protocol, PeerPublicKey: d.PeerPublicKey, AssignedIP: d.AssignedIP, Keepalive: d.PersistentKeepalive, EndpointParams: d.EndpointParams}
 		desiredFingerprints[peerFingerprint(d.Protocol, d.PeerPublicKey, d.AssignedIP)] = struct{}{}
 	}
 	runtimeByAccess := make(map[string]runtime.PeerStat, len(stats))
@@ -324,6 +326,7 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 			PeerPublicKey:  d.PeerPublicKey,
 			AssignedIP:     d.AssignedIP,
 			Keepalive:      d.Keepalive,
+			EndpointMeta:   endpointParamsToStringMap(d.EndpointParams),
 		})
 		if err != nil {
 			logger.Error("reconcile apply failed", slog.String("access_id", accessID), slog.Any("error", err))
@@ -405,6 +408,24 @@ func valueOrFallback(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func endpointParamsToStringMap(in map[string]any) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, error) {

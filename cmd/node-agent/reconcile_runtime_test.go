@@ -12,9 +12,11 @@ import (
 type testRuntime struct {
 	stats       []runtime.PeerStat
 	revokeCalls int
+	applyCalls  []runtime.PeerOperationRequest
 }
 
 func (t *testRuntime) ApplyPeer(ctx context.Context, req runtime.PeerOperationRequest) (runtime.OperationResult, error) {
+	t.applyCalls = append(t.applyCalls, req)
 	return runtime.OperationResult{OperationID: req.OperationID, Applied: true}, nil
 }
 func (t *testRuntime) RevokePeer(ctx context.Context, req runtime.PeerOperationRequest) (runtime.OperationResult, error) {
@@ -67,5 +69,34 @@ func TestReconcileRuntime_DoesNotRevokeOrphanWhenPeerPresentInDesiredByFingerpri
 	_ = reconcileRuntime(context.Background(), logger, rt, desired)
 	if rt.revokeCalls != 0 {
 		t.Fatalf("did not expect revoke for desired xray orphan, got %d", rt.revokeCalls)
+	}
+}
+
+func TestReconcileRuntime_PassesEndpointParamsToApply(t *testing.T) {
+	rt := &testRuntime{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	desired := []struct {
+		AccessID            string         `json:"access_id"`
+		Protocol            string         `json:"protocol"`
+		PeerPublicKey       string         `json:"peer_public_key"`
+		AssignedIP          string         `json:"assigned_ip"`
+		PersistentKeepalive int            `json:"persistent_keepalive"`
+		EndpointParams      map[string]any `json:"endpoint_params"`
+	}{
+		{
+			AccessID:            "a-wg-1",
+			Protocol:            "wireguard",
+			PeerPublicKey:       "peer1",
+			AssignedIP:          "10.8.1.9/32",
+			PersistentKeepalive: 25,
+			EndpointParams:      map[string]any{"preshared_key": "psk-value"},
+		},
+	}
+	_ = reconcileRuntime(context.Background(), logger, rt, desired)
+	if len(rt.applyCalls) != 1 {
+		t.Fatalf("expected one apply call, got %d", len(rt.applyCalls))
+	}
+	if got := rt.applyCalls[0].EndpointMeta["preshared_key"]; got != "psk-value" {
+		t.Fatalf("expected endpoint meta preshared_key to be passed, got %q", got)
 	}
 }

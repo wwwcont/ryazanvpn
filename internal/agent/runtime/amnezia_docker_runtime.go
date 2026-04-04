@@ -40,6 +40,7 @@ type AmneziaDockerRuntime struct {
 	mu         sync.Mutex
 	operations map[string]operationRecord
 	peersByKey map[string]PeerState
+	pskByPeer  map[string]string
 }
 
 func NewAmneziaDockerRuntime(logger *slog.Logger, cfg AmneziaDockerRuntimeConfig, executor shell.CommandExecutor) *AmneziaDockerRuntime {
@@ -49,6 +50,7 @@ func NewAmneziaDockerRuntime(logger *slog.Logger, cfg AmneziaDockerRuntimeConfig
 		exec:       executor,
 		operations: make(map[string]operationRecord),
 		peersByKey: make(map[string]PeerState),
+		pskByPeer:  make(map[string]string),
 	}
 }
 
@@ -135,13 +137,22 @@ func (r *AmneziaDockerRuntime) ApplyPeer(ctx context.Context, req PeerOperationR
 
 	args := []string{"exec", r.cfg.ContainerName, "awg", "set", r.cfg.InterfaceName, "peer", req.PeerPublicKey}
 	cleanupPath := ""
-	if psk := strings.TrimSpace(req.EndpointMeta["preshared_key"]); psk != "" {
+	psk := strings.TrimSpace(req.EndpointMeta["preshared_key"])
+	if psk == "" {
+		r.mu.Lock()
+		psk = strings.TrimSpace(r.pskByPeer[req.PeerPublicKey])
+		r.mu.Unlock()
+	}
+	if psk != "" {
 		cleanupPath, err = r.writePresharedKeyFile(ctx, psk)
 		if err != nil {
 			return OperationResult{}, err
 		}
 		defer r.removeContainerFile(context.Background(), cleanupPath)
 		args = append(args, "preshared-key", cleanupPath)
+		r.mu.Lock()
+		r.pskByPeer[req.PeerPublicKey] = psk
+		r.mu.Unlock()
 	}
 	args = append(args, "allowed-ips", assignedIP+"/32")
 

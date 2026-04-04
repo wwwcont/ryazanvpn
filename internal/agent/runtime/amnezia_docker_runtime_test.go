@@ -78,6 +78,53 @@ func TestAmneziaDockerRuntime_ApplyPeerBuildsCommand(t *testing.T) {
 	}
 }
 
+func TestAmneziaDockerRuntime_ApplyPeer_ReusesCachedPresharedKey(t *testing.T) {
+	exec := &amneziaFakeExecutor{}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{DockerBinaryPath: "/usr/bin/docker", ContainerName: "amnezia-awg2", InterfaceName: "awg0", CommandTimeout: time.Second}, exec)
+	ctx := context.Background()
+
+	_, err := rt.ApplyPeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-1",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+		AssignedIP:     "10.0.0.9",
+		Keepalive:      25,
+		EndpointMeta:   map[string]string{"preshared_key": "cachedPSK123+/="},
+	})
+	if err != nil {
+		t.Fatalf("unexpected first apply error: %v", err)
+	}
+	firstSetCall := exec.calls[len(exec.calls)-2]
+	if got := strings.Join(firstSetCall.Args, " "); !strings.Contains(got, "preshared-key /tmp/ryazanvpn-psk-") {
+		t.Fatalf("expected first apply to include psk file, got %v", firstSetCall.Args)
+	}
+
+	_, err = rt.RevokePeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-revoke",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+	})
+	if err != nil {
+		t.Fatalf("unexpected revoke error: %v", err)
+	}
+
+	_, err = rt.ApplyPeer(ctx, PeerOperationRequest{
+		OperationID:    "op-cache-2",
+		DeviceAccessID: "da-1",
+		PeerPublicKey:  "pub-cache",
+		AssignedIP:     "10.0.0.9",
+		Keepalive:      25,
+		EndpointMeta:   map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected second apply error: %v", err)
+	}
+	secondSetCall := exec.calls[len(exec.calls)-2]
+	if got := strings.Join(secondSetCall.Args, " "); !strings.Contains(got, "preshared-key /tmp/ryazanvpn-psk-") {
+		t.Fatalf("expected cached psk to be reused on second apply, got %v", secondSetCall.Args)
+	}
+}
+
 func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 	exec := &amneziaFakeExecutor{}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{DockerBinaryPath: "/usr/bin/docker", ContainerName: "amnezia-awg2", InterfaceName: "awg0", CommandTimeout: time.Second}, exec)
