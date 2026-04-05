@@ -1,6 +1,7 @@
 # node-agent (standalone repo-ready)
 
 Эта директория самодостаточна: можно скопировать её содержимое в отдельный git-репозиторий node-agent.
+Внутри оставлен только entrypoint `cmd/node-agent`.
 
 ## Быстрый старт
 

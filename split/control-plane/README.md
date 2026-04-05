@@ -1,6 +1,7 @@
 # control-plane (standalone repo-ready)
 
 Эта директория самодостаточна: можно скопировать её содержимое в отдельный git-репозиторий control-plane.
+Внутри оставлен только entrypoint `cmd/control-plane`.
 
 ## Быстрый старт
 

@@ -5,6 +5,8 @@
 - `control-plane/`
 - `node-agent/`
 
+Важно: директории теперь разделены по сервисам — в `control-plane` нет `cmd/node-agent`, а в `node-agent` нет `cmd/control-plane`.
+
 ## Как использовать
 
 1. Скопируйте содержимое `split/control-plane` в новый репозиторий `ryazanvpn-control-plane`.
