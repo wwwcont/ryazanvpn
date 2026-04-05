@@ -402,9 +402,18 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 			continue
 		}
 		opID := fmt.Sprintf("reconcile-revoke-orphan-%d", time.Now().UTC().UnixNano())
+		accessID := strings.TrimSpace(cur.DeviceAccessID)
+		if strings.EqualFold(protocol, "xray") && accessID == "" {
+			logger.Warn("reconcile revoke orphan skipped for xray peer without access_id", slog.String("peer_public_key", cur.PeerPublicKey))
+			results = append(results, map[string]any{"operation_id": opID, "action": "revoke_orphan", "status": "skipped", "reason": "missing access_id for xray", "protocol": protocol, "peer_public_key": cur.PeerPublicKey})
+			continue
+		}
+		if accessID == "" {
+			accessID = "peer-" + strings.TrimSpace(cur.PeerPublicKey)
+		}
 		_, err := rt.RevokePeer(ctx, runtime.PeerOperationRequest{
 			OperationID:    opID,
-			DeviceAccessID: valueOrFallback(strings.TrimSpace(cur.DeviceAccessID), "orphan"),
+			DeviceAccessID: accessID,
 			Protocol:       protocol,
 			PeerPublicKey:  strings.TrimSpace(cur.PeerPublicKey),
 			AssignedIP:     strings.TrimSpace(cur.AllowedIP),
@@ -431,13 +440,6 @@ func normalizeIPForCompare(raw string) string {
 		raw = raw[:i]
 	}
 	return raw
-}
-
-func valueOrFallback(v, fallback string) string {
-	if strings.TrimSpace(v) == "" {
-		return fallback
-	}
-	return v
 }
 
 func endpointParamsToStringMap(in map[string]any) map[string]string {

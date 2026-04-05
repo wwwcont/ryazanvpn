@@ -12,6 +12,7 @@ import (
 type testRuntime struct {
 	stats       []runtime.PeerStat
 	revokeCalls int
+	revokeReqs  []runtime.PeerOperationRequest
 	applyCalls  []runtime.PeerOperationRequest
 }
 
@@ -21,6 +22,7 @@ func (t *testRuntime) ApplyPeer(ctx context.Context, req runtime.PeerOperationRe
 }
 func (t *testRuntime) RevokePeer(ctx context.Context, req runtime.PeerOperationRequest) (runtime.OperationResult, error) {
 	t.revokeCalls++
+	t.revokeReqs = append(t.revokeReqs, req)
 	return runtime.OperationResult{OperationID: req.OperationID, Applied: true}, nil
 }
 func (t *testRuntime) ListPeerStats(ctx context.Context) ([]runtime.PeerStat, error) {
@@ -50,6 +52,9 @@ func TestReconcileRuntime_RevokesOrphanRuntimePeerWithoutAccessID(t *testing.T) 
 	if len(results) == 0 || results[0]["status"] != "ok" {
 		t.Fatalf("expected successful orphan revoke result, got %#v", results)
 	}
+	if len(rt.revokeReqs) != 1 || rt.revokeReqs[0].DeviceAccessID == "orphan" {
+		t.Fatalf("expected no literal orphan access id, got %+v", rt.revokeReqs)
+	}
 }
 
 func TestReconcileRuntime_DoesNotRevokeOrphanWhenPeerPresentInDesiredByFingerprint(t *testing.T) {
@@ -69,6 +74,18 @@ func TestReconcileRuntime_DoesNotRevokeOrphanWhenPeerPresentInDesiredByFingerpri
 	_ = reconcileRuntime(context.Background(), logger, rt, desired)
 	if rt.revokeCalls != 0 {
 		t.Fatalf("did not expect revoke for desired xray orphan, got %d", rt.revokeCalls)
+	}
+}
+
+func TestReconcileRuntime_SkipsXrayOrphanWithoutAccessID(t *testing.T) {
+	rt := &testRuntime{stats: []runtime.PeerStat{{Protocol: "xray", PeerPublicKey: "11111111-1111-1111-1111-111111111111"}}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	results := reconcileRuntime(context.Background(), logger, rt, nil)
+	if rt.revokeCalls != 0 {
+		t.Fatalf("did not expect xray orphan revoke without access_id, got %d", rt.revokeCalls)
+	}
+	if len(results) == 0 || results[0]["status"] != "skipped" {
+		t.Fatalf("expected skipped result, got %#v", results)
 	}
 }
 
