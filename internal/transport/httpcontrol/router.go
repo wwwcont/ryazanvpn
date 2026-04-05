@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -51,25 +53,27 @@ type AuditLogger interface {
 }
 
 type Options struct {
-	Logger            *slog.Logger
-	PG                *pgxpool.Pool
-	RedisClient       *redis.Client
-	ReadinessTimeout  time.Duration
-	DownloadUC        *app.DownloadDeviceConfigByToken
-	AdminSecret       string
-	AdminSecretHeader string
-	Nodes             NodeAdminReader
-	Users             UserAdminReader
-	Devices           DeviceAdminReader
-	InviteCodes       InviteCodeAdminRepo
-	AuditLogs         AuditLogger
-	TelegramWebhook   http.Handler
-	AgentHMACSecret   string
-	NodeRegisterToken string
-	Finance           *app.FinanceService
-	NodeLinkCapacityBPS int64
+	Logger                   *slog.Logger
+	PG                       *pgxpool.Pool
+	RedisClient              *redis.Client
+	ReadinessTimeout         time.Duration
+	DownloadUC               *app.DownloadDeviceConfigByToken
+	AdminSecret              string
+	AdminSecretHeader        string
+	Nodes                    NodeAdminReader
+	Users                    UserAdminReader
+	Devices                  DeviceAdminReader
+	InviteCodes              InviteCodeAdminRepo
+	AuditLogs                AuditLogger
+	TelegramWebhook          http.Handler
+	AgentHMACSecret          string
+	NodeRegisterToken        string
+	Finance                  *app.FinanceService
+	NodeLinkCapacityBPS      int64
 	NodeThroughputSampleStep time.Duration
-	NodeThroughputRetention time.Duration
+	NodeThroughputRetention  time.Duration
+	NodeRateLimitPerMinute   int
+	AdminRateLimitPerMinute  int
 }
 
 var inviteCodePattern = regexp.MustCompile(`^\d{4}$`)
@@ -207,21 +211,21 @@ COALESCE((
 				util = (currentBps / float64(opts.NodeLinkCapacityBPS)) * 100
 			}
 			items = append(items, map[string]any{
-				"id":             id,
-				"name":           name,
-				"status":         status,
-				"current_load":   load,
-				"user_capacity":  capacity,
-				"node_load":      nodeLoad,
-				"agent_base_url": agentURL,
-				"vpn_endpoint":   endpoint,
-				"last_seen_at":   lastSeen,
-				"current_bps_estimate": currentBps,
-				"median_bps_1h": medianBps1h,
-				"p95_bps_1h": p95Bps1h,
-				"peak_bps_24h": peakBps24h,
-				"runtime_peers_total": peersTotal,
-				"runtime_peers_resolved": peersResolved,
+				"id":                       id,
+				"name":                     name,
+				"status":                   status,
+				"current_load":             load,
+				"user_capacity":            capacity,
+				"node_load":                nodeLoad,
+				"agent_base_url":           agentURL,
+				"vpn_endpoint":             endpoint,
+				"last_seen_at":             lastSeen,
+				"current_bps_estimate":     currentBps,
+				"median_bps_1h":            medianBps1h,
+				"p95_bps_1h":               p95Bps1h,
+				"peak_bps_24h":             peakBps24h,
+				"runtime_peers_total":      peersTotal,
+				"runtime_peers_resolved":   peersResolved,
 				"link_utilization_percent": util,
 			})
 		}
@@ -234,9 +238,9 @@ COALESCE((
 			retention = 48 * time.Hour
 		}
 		respondJSON(w, http.StatusOK, map[string]any{
-			"items": items,
+			"items":               items,
 			"sample_step_seconds": int64(step.Seconds()),
-			"retention_seconds": int64(retention.Seconds()),
+			"retention_seconds":   int64(retention.Seconds()),
 		})
 	})
 
@@ -416,12 +420,19 @@ ORDER BY month DESC, tum.protocol`, uid)
 	})
 
 	r.Route("/nodes", func(nr chi.Router) {
-		nr.Use(nodeAgentAuthMiddleware(opts.AgentHMACSecret, opts.Logger, 5*time.Minute))
+		nr.Use(rateLimitMiddleware(newWindowRateLimiter(opts.NodeRateLimitPerMinute, time.Minute), func(r *http.Request) string {
+			nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+			if nodeID != "" {
+				return "node:" + nodeID
+			}
+			return "ip:" + clientIP(r)
+		}))
+		nr.Use(nodeIdentityMiddleware(opts.NodeRegisterToken))
+		nr.Use(nodeAgentAuthMiddleware(opts.AgentHMACSecret, opts.RedisClient, opts.Logger, 5*time.Minute, 5*time.Minute))
 
 		nr.Post("/register", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				NodeID       string   `json:"node_id"`
-				NodeToken    string   `json:"node_token"`
 				NodeName     string   `json:"node_name"`
 				AgentBaseURL string   `json:"agent_base_url"`
 				Region       string   `json:"region"`
@@ -433,13 +444,14 @@ ORDER BY month DESC, tum.protocol`, uid)
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" && strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(req.NodeID)
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			nodeName := strings.TrimSpace(req.NodeName)
@@ -495,7 +507,6 @@ ON CONFLICT (id) DO UPDATE SET
 		nr.Post("/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				NodeID    string   `json:"node_id"`
-				NodeToken string   `json:"node_token"`
 				Status    string   `json:"status"`
 				Protocols []string `json:"protocols"`
 			}
@@ -503,13 +514,14 @@ ON CONFLICT (id) DO UPDATE SET
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" && strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(req.NodeID)
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			status := "active"
@@ -527,14 +539,14 @@ ON CONFLICT (id) DO UPDATE SET
 		})
 
 		nr.Get("/desired-state", func(w http.ResponseWriter, r *http.Request) {
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(r.URL.Query().Get("node_id"))
-			nodeToken := strings.TrimSpace(r.URL.Query().Get("node_token"))
-			if opts.NodeRegisterToken != "" && nodeToken != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			var nodeStatus string
@@ -607,9 +619,8 @@ WHERE da.vpn_node_id=$1
 
 		nr.Post("/apply", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
-				NodeID    string `json:"node_id"`
-				NodeToken string `json:"node_token"`
-				Results   []struct {
+				NodeID  string `json:"node_id"`
+				Results []struct {
 					OperationID string `json:"operation_id"`
 					AccessID    string `json:"access_id"`
 					Action      string `json:"action"`
@@ -621,11 +632,14 @@ WHERE da.vpn_node_id=$1
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" {
-				if strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-					return
-				}
+			headerNodeID := nodeIDFromContext(r.Context())
+			if strings.TrimSpace(req.NodeID) == "" {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != strings.TrimSpace(req.NodeID) {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
+				return
 			}
 			for _, item := range req.Results {
 				status := "failed"
@@ -667,6 +681,9 @@ WHERE da.vpn_node_id=$1
 	})
 
 	r.Route("/admin", func(ar chi.Router) {
+		ar.Use(rateLimitMiddleware(newWindowRateLimiter(opts.AdminRateLimitPerMinute, time.Minute), func(r *http.Request) string {
+			return "ip:" + clientIP(r)
+		}))
 		ar.Use(adminAuthMiddleware(opts.AdminSecretHeader, opts.AdminSecret))
 
 		ar.Get("/nodes", func(w http.ResponseWriter, r *http.Request) {
@@ -856,7 +873,38 @@ WHERE da.vpn_node_id=$1
 	return r
 }
 
-func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Duration) func(http.Handler) http.Handler {
+type contextKey string
+
+const (
+	contextNodeIDKey contextKey = "node_id"
+)
+
+func nodeIDFromContext(ctx context.Context) string {
+	raw, _ := ctx.Value(contextNodeIDKey).(string)
+	return strings.TrimSpace(raw)
+}
+
+func nodeIdentityMiddleware(expectedToken string) func(http.Handler) http.Handler {
+	normalized := strings.TrimSpace(expectedToken)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+			nodeToken := strings.TrimSpace(r.Header.Get("X-Node-Token"))
+			if nodeID == "" || nodeToken == "" {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing node identity headers"})
+				return
+			}
+			if normalized != "" && nodeToken != normalized {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
+				return
+			}
+			ctx := context.WithValue(r.Context(), contextNodeIDKey, nodeID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func nodeAgentAuthMiddleware(secret string, redisClient *redis.Client, logger *slog.Logger, maxSkew time.Duration, replayTTL time.Duration) func(http.Handler) http.Handler {
 	key := []byte(strings.TrimSpace(secret))
 	if logger == nil {
 		logger = slog.Default()
@@ -865,8 +913,13 @@ func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Du
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tsRaw := r.Header.Get(auth.HeaderTimestamp)
 			sigHex := r.Header.Get(auth.HeaderSignature)
+			reqID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
 			if tsRaw == "" || sigHex == "" {
 				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing auth headers"})
+				return
+			}
+			if reqID == "" {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing request id"})
 				return
 			}
 			ts, err := strconv.ParseInt(tsRaw, 10, 64)
@@ -891,9 +944,92 @@ func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Du
 				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid signature"})
 				return
 			}
+			if redisClient != nil {
+				nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+				if nodeID == "" {
+					nodeID = "unknown"
+				}
+				replayKey := fmt.Sprintf("node:req:%s:%s", nodeID, reqID)
+				ok, err := redisClient.SetNX(r.Context(), replayKey, "1", replayTTL).Result()
+				if err != nil {
+					logger.Warn("request replay check failed", slog.Any("error", err), slog.String("path", r.URL.Path))
+					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "request replay check failed"})
+					return
+				}
+				if !ok {
+					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "replay detected"})
+					return
+				}
+			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type windowRateLimiter struct {
+	mu      sync.Mutex
+	limit   int
+	window  time.Duration
+	buckets map[string]windowCounter
+}
+
+type windowCounter struct {
+	count int
+	reset time.Time
+}
+
+func newWindowRateLimiter(limit int, window time.Duration) *windowRateLimiter {
+	if limit <= 0 {
+		limit = 60
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	return &windowRateLimiter{
+		limit:   limit,
+		window:  window,
+		buckets: make(map[string]windowCounter),
+	}
+}
+
+func (l *windowRateLimiter) allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	v, ok := l.buckets[key]
+	if !ok || now.After(v.reset) {
+		l.buckets[key] = windowCounter{count: 1, reset: now.Add(l.window)}
+		return true
+	}
+	if v.count >= l.limit {
+		return false
+	}
+	v.count++
+	l.buckets[key] = v
+	return true
+}
+
+func rateLimitMiddleware(l *windowRateLimiter, keyFn func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := keyFn(r)
+			if strings.TrimSpace(key) == "" {
+				key = "anonymous"
+			}
+			if !l.allow(key, time.Now().UTC()) {
+				respondJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate limit exceeded"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && strings.TrimSpace(host) != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func adminAuthMiddleware(headerName, secret string) func(http.Handler) http.Handler {

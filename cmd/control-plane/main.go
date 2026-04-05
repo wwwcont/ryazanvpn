@@ -202,25 +202,27 @@ func main() {
 	}
 
 	router := httpcontrol.NewRouter(httpcontrol.Options{
-		Logger:            logger,
-		PG:                pg,
-		RedisClient:       redisClient,
-		ReadinessTimeout:  cfg.ReadinessTimeout,
-		DownloadUC:        downloadUC,
-		AdminSecret:       cfg.AdminSecret,
-		AdminSecretHeader: cfg.AdminSecretHeader,
-		Nodes:             nodeRepo,
-		Users:             userRepo,
-		Devices:           deviceRepo,
-		InviteCodes:       inviteRepo,
-		AuditLogs:         auditRepo,
-		TelegramWebhook:   telegramWebhookHandler,
-		AgentHMACSecret:   cfg.AgentHMACSecret,
-		NodeRegisterToken: cfg.NodeRegistrationToken,
-		Finance:           financeSvc,
-		NodeLinkCapacityBPS: cfg.NodeLinkCapacityBPS,
+		Logger:                   logger,
+		PG:                       pg,
+		RedisClient:              redisClient,
+		ReadinessTimeout:         cfg.ReadinessTimeout,
+		DownloadUC:               downloadUC,
+		AdminSecret:              cfg.AdminSecret,
+		AdminSecretHeader:        cfg.AdminSecretHeader,
+		Nodes:                    nodeRepo,
+		Users:                    userRepo,
+		Devices:                  deviceRepo,
+		InviteCodes:              inviteRepo,
+		AuditLogs:                auditRepo,
+		TelegramWebhook:          telegramWebhookHandler,
+		AgentHMACSecret:          cfg.AgentHMACSecret,
+		NodeRegisterToken:        cfg.NodeRegistrationToken,
+		Finance:                  financeSvc,
+		NodeLinkCapacityBPS:      cfg.NodeLinkCapacityBPS,
 		NodeThroughputSampleStep: cfg.NodeThroughputSampleStep,
-		NodeThroughputRetention: cfg.NodeThroughputRetention,
+		NodeThroughputRetention:  cfg.NodeThroughputRetention,
+		NodeRateLimitPerMinute:   cfg.NodeRateLimitPerMinute,
+		AdminRateLimitPerMinute:  cfg.AdminRateLimitPerMinute,
 	})
 
 	srv := &http.Server{
@@ -247,13 +249,13 @@ func main() {
 	}.Run(workerCtx)
 
 	go app.TrafficCollectorWorker{
-		Logger:        logger,
-		Nodes:         nodeRepo,
-		Accesses:      accessRepo,
-		Traffic:       trafficRepo,
-		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
-		PollInterval:  cfg.NodeThroughputSampleStep,
-		SampleStep:    cfg.NodeThroughputSampleStep,
+		Logger:          logger,
+		Nodes:           nodeRepo,
+		Accesses:        accessRepo,
+		Traffic:         trafficRepo,
+		ClientFactory:   nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
+		PollInterval:    cfg.NodeThroughputSampleStep,
+		SampleStep:      cfg.NodeThroughputSampleStep,
 		SampleRetention: cfg.NodeThroughputRetention,
 	}.Run(workerCtx)
 
