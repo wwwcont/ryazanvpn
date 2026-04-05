@@ -119,7 +119,7 @@ func TestSendHealthLink_UsesXrayExporter(t *testing.T) {
 	svc := &TelegramService{
 		Bot:             bot,
 		Devices:         &fakeDevices{active: &device.Device{ID: "d1"}},
-		Accesses:        &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`)}}},
+		Accesses:        &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"xray_export":{"uuid":"11111111-1111-1111-1111-111111111111","server_host":"x.example.com","server_port":8443,"server_name":"www.cloudflare.com","public_key":"pub","short_id":"0123456789abcdef","uri":"vless://11111111-1111-1111-1111-111111111111@x.example.com:8443?security=reality"}}`)}}},
 		ConfigEncryptor: fakeEncryptor{},
 		XrayExporter:    xexp,
 		XrayPublicHost:  "x.example.com",
@@ -129,8 +129,8 @@ func TestSendHealthLink_UsesXrayExporter(t *testing.T) {
 		XrayPublicKey:   "pub",
 	}
 	svc.sendHealthLink(context.Background(), 1, "u1")
-	if xexp.calls != 1 {
-		t.Fatalf("xray exporter should be called once, got %d", xexp.calls)
+	if xexp.calls != 0 {
+		t.Fatalf("xray exporter should not be called when URI is embedded in config, got %d", xexp.calls)
 	}
 	if len(bot.messages) == 0 || !strings.Contains(bot.messages[len(bot.messages)-1].text, "vless://") {
 		t.Fatalf("expected vless link message, got %+v", bot.messages)
@@ -166,7 +166,7 @@ func TestHandleGetConfig_DefaultProtocolXray(t *testing.T) {
 		}},
 		Devices: &fakeDevices{active: &device.Device{ID: "d1"}},
 		Accesses: &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{
-			"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`)},
+			"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"xray_export":{"uuid":"11111111-1111-1111-1111-111111111111","uri":"vless://11111111-1111-1111-1111-111111111111@x.example.com:8443?security=reality"}}`)},
 			"aw": {ID: "aw", DeviceID: "d1", Protocol: "wireguard", VPNNodeID: "n1", ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n")},
 		}},
 		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},

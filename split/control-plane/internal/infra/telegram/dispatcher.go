@@ -1598,17 +1598,23 @@ func (s *TelegramService) exportXrayLink(ctx context.Context, configPlain string
 	if s.XrayExporter == nil {
 		return "", fmt.Errorf("xray exporter is not configured")
 	}
-	uuid, err := parseXrayUUID(configPlain)
+	exportCfg, err := parseXrayExportConfig(configPlain)
 	if err != nil {
-		return "", fmt.Errorf("parse xray uuid: %w", err)
+		return "", fmt.Errorf("parse xray export fields: %w", err)
 	}
+	if strings.TrimSpace(exportCfg.URI) != "" {
+		return strings.TrimSpace(exportCfg.URI), nil
+	}
+	uuid := strings.TrimSpace(exportCfg.UUID)
 	link, err := s.XrayExporter.ExportVLESSReality(ctx, app.ExportXrayRealityInput{
 		UUID:             uuid,
-		ServerHost:       s.XrayPublicHost,
-		Port:             s.XrayRealityPort,
-		RealityPublicKey: s.XrayPublicKey,
-		ServerName:       s.XrayServerName,
-		ShortID:          s.XrayShortID,
+		ServerHost:       strOr(strings.TrimSpace(exportCfg.ServerHost), s.XrayPublicHost),
+		Port:             intOr(strings.TrimSpace(exportCfg.ServerPort), s.XrayRealityPort),
+		RealityPublicKey: strOr(strings.TrimSpace(exportCfg.PublicKey), s.XrayPublicKey),
+		ServerName:       strOr(strings.TrimSpace(exportCfg.ServerName), s.XrayServerName),
+		ShortID:          strOr(strings.TrimSpace(exportCfg.ShortID), s.XrayShortID),
+		Fingerprint:      strings.TrimSpace(exportCfg.Fingerprint),
+		Flow:             strings.TrimSpace(exportCfg.Flow),
 		Label:            "RyazanVPN Health",
 	})
 	if err != nil {
@@ -1644,27 +1650,74 @@ func (s *TelegramService) logConfigExportError(chatID int64, userID, deviceID, a
 	)
 }
 
-func parseXrayUUID(configPlain string) (string, error) {
-	type xrayCfg struct {
-		ID string `json:"id"`
-	}
+type parsedXrayExportConfig struct {
+	URI         string
+	UUID        string
+	ServerHost  string
+	ServerPort  string
+	ServerName  string
+	PublicKey   string
+	ShortID     string
+	Fingerprint string
+	Flow        string
+}
+
+func parseXrayExportConfig(configPlain string) (parsedXrayExportConfig, error) {
 	trimmed := strings.TrimSpace(configPlain)
 	if strings.HasPrefix(trimmed, "vless://") {
 		raw := strings.TrimPrefix(trimmed, "vless://")
 		parts := strings.SplitN(raw, "@", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
-			return "", fmt.Errorf("invalid vless link")
+			return parsedXrayExportConfig{}, fmt.Errorf("invalid vless link")
 		}
-		return strings.TrimSpace(parts[0]), nil
+		return parsedXrayExportConfig{URI: trimmed, UUID: strings.TrimSpace(parts[0])}, nil
 	}
-	var parsed xrayCfg
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return "", err
+		return parsedXrayExportConfig{}, err
 	}
-	if strings.TrimSpace(parsed.ID) == "" {
-		return "", fmt.Errorf("xray uuid is empty")
+	if exp, ok := parsed["xray_export"].(map[string]any); ok {
+		cfg := parsedXrayExportConfig{
+			URI:         anyToString(exp["uri"]),
+			UUID:        anyToString(exp["uuid"]),
+			ServerHost:  anyToString(exp["server_host"]),
+			ServerPort:  anyToString(exp["server_port"]),
+			ServerName:  anyToString(exp["server_name"]),
+			PublicKey:   anyToString(exp["public_key"]),
+			ShortID:     anyToString(exp["short_id"]),
+			Fingerprint: anyToString(exp["fingerprint"]),
+			Flow:        anyToString(exp["flow"]),
+		}
+		if strings.TrimSpace(cfg.UUID) != "" {
+			return cfg, nil
+		}
 	}
-	return strings.TrimSpace(parsed.ID), nil
+	if v, ok := parsed["id"]; ok && strings.TrimSpace(anyToString(v)) != "" {
+		return parsedXrayExportConfig{UUID: strings.TrimSpace(anyToString(v))}, nil
+	}
+	return parsedXrayExportConfig{}, fmt.Errorf("xray uuid is empty")
+}
+
+func intOr(raw string, fallback int) int {
+	if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v > 0 {
+		return v
+	}
+	return fallback
+}
+
+func anyToString(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return strconv.FormatInt(int64(val), 10)
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 func (s *TelegramService) resolveActiveAccessID(ctx context.Context, userID string) (string, error) {

@@ -41,32 +41,34 @@ type CreateDeviceForUserOutput struct {
 }
 
 type CreateDeviceForUser struct {
-	Users              UserRepository
-	Devices            DeviceRepository
-	Nodes              NodeRepository
-	Accesses           DeviceAccessRepository
-	Operations         NodeOperationRepository
-	AuditLogs          AuditLogRepository
-	KeyGenerator       KeyGenerator
-	PresharedKeys      PresharedKeyGenerator
-	IPAllocator        IPAllocator
-	NodeAssigner       NodeAssigner
-	CreatePeerExecutor *ExecuteCreatePeerOperation
-	ConfigIssuer       *IssueDeviceConfig
-	ServerPublicKey    string
-	EndpointHost       string
-	EndpointPort       int
-	PublicEndpoint     string
-	DNS                []string
-	ClientAllowedIPs   []string
-	Keepalive          int
-	MTU                int
-	DefaultVPNAWG      DefaultVPNAWGFields
-	XrayPublicHost     string
-	XrayRealityPort    int
-	XrayRealitySNI     string
-	TokenTTL           time.Duration
-	SensitiveEncryptor EncryptionService
+	Users                UserRepository
+	Devices              DeviceRepository
+	Nodes                NodeRepository
+	Accesses             DeviceAccessRepository
+	Operations           NodeOperationRepository
+	AuditLogs            AuditLogRepository
+	KeyGenerator         KeyGenerator
+	PresharedKeys        PresharedKeyGenerator
+	IPAllocator          IPAllocator
+	NodeAssigner         NodeAssigner
+	CreatePeerExecutor   *ExecuteCreatePeerOperation
+	ConfigIssuer         *IssueDeviceConfig
+	ServerPublicKey      string
+	EndpointHost         string
+	EndpointPort         int
+	PublicEndpoint       string
+	DNS                  []string
+	ClientAllowedIPs     []string
+	Keepalive            int
+	MTU                  int
+	DefaultVPNAWG        DefaultVPNAWGFields
+	XrayPublicHost       string
+	XrayRealityPort      int
+	XrayRealitySNI       string
+	XrayRealityShortID   string
+	XrayRealityPublicKey string
+	TokenTTL             time.Duration
+	SensitiveEncryptor   EncryptionService
 }
 
 func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUserInput) (*CreateDeviceForUserOutput, error) {
@@ -289,6 +291,8 @@ func (uc CreateDeviceForUser) Execute(ctx context.Context, in CreateDeviceForUse
 			EndpointHost:    valueOrDefault(uc.XrayPublicHost, valueOrDefault(uc.EndpointHost, vpnHost)),
 			EndpointPort:    valueOrDefaultInt(uc.XrayRealityPort, valueOrDefaultInt(uc.EndpointPort, vpnPort)),
 			XrayServerName:  uc.XrayRealitySNI,
+			XrayPublicKey:   uc.XrayRealityPublicKey,
+			XrayShortID:     uc.XrayRealityShortID,
 			TokenTTL:        uc.TokenTTL,
 		})
 		if xErr == nil {

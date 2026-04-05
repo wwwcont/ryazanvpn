@@ -35,6 +35,10 @@ type IssueDeviceConfigInput struct {
 	AWG              DefaultVPNAWGFields
 	XrayUserUUID     string
 	XrayServerName   string
+	XrayPublicKey    string
+	XrayShortID      string
+	XrayFingerprint  string
+	XrayFlow         string
 	TokenTTL         time.Duration
 }
 
@@ -78,6 +82,14 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 	var cfg string
 	switch protocol {
 	case "xray":
+		if err := ValidateConfigEndpointHost(in.EndpointHost); err != nil {
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "endpoint_host", in.EndpointHost, "endpoint_port", in.EndpointPort, "error", err)
+			return nil, err
+		}
+		if err := ValidateConfigEndpointPort(in.EndpointPort); err != nil {
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "endpoint_host", in.EndpointHost, "endpoint_port", in.EndpointPort, "error", err)
+			return nil, err
+		}
 		userUUID := strings.TrimSpace(in.XrayUserUUID)
 		if userUUID == "" {
 			userUUID = hashToken(in.DeviceAccessID)[:32]
@@ -89,8 +101,20 @@ func (uc IssueDeviceConfig) Execute(ctx context.Context, in IssueDeviceConfigInp
 			ServerHost:   in.EndpointHost,
 			ServerPort:   in.EndpointPort,
 			UserUUID:     userUUID,
+			PublicKey:    strings.TrimSpace(in.XrayPublicKey),
+			ShortID:      strings.TrimSpace(in.XrayShortID),
+			Fingerprint:  strings.TrimSpace(in.XrayFingerprint),
+			Flow:         strings.TrimSpace(in.XrayFlow),
 		})
 	case "wireguard":
+		if err := ValidateConfigEndpointHost(in.EndpointHost); err != nil {
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "endpoint_host", in.EndpointHost, "endpoint_port", in.EndpointPort, "error", err)
+			return nil, err
+		}
+		if err := ValidateConfigEndpointPort(in.EndpointPort); err != nil {
+			slog.Error("issue_device_config.error", "access_id", in.DeviceAccessID, "protocol", in.Protocol, "endpoint_host", in.EndpointHost, "endpoint_port", in.EndpointPort, "error", err)
+			return nil, err
+		}
 		slog.Info("wg.config.render.access_id", "access_id", in.DeviceAccessID)
 		slog.Info("wg.config.render.server_public_key", "access_id", in.DeviceAccessID, "server_public_key", strings.TrimSpace(in.ServerPublicKey))
 		derivedPublicKey, derErr := wgkeys.DerivePublicKey(in.DevicePrivateKey)

@@ -64,6 +64,27 @@ func TestIssueDeviceConfig_RejectsMismatchedPublicKey(t *testing.T) {
 	}
 }
 
+func TestIssueDeviceConfig_RejectsDocumentationEndpointHost(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	accessRepo := &cfgAccessRepo{entry: &access.DeviceAccess{ID: "a1"}}
+	issue := IssueDeviceConfig{Accesses: accessRepo, Tokens: &cfgTokenRepo{}, Renderer: fakeRenderer{}, Encryptor: fakeEncryptor{}, Now: func() time.Time { return now }}
+
+	_, err := issue.Execute(context.Background(), IssueDeviceConfigInput{
+		DeviceAccessID:   "a1",
+		Protocol:         "wireguard",
+		DevicePrivateKey: "FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=",
+		DevicePublicKey:  "jVcMIlprLo8VEAAXIBMDf08IxK0oRWLSArQryOk0DDE=",
+		ServerPublicKey:  "srv",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "203.0.113.10",
+		EndpointPort:     51820,
+	})
+	if err == nil || !strings.Contains(err.Error(), "documentation placeholder") {
+		t.Fatalf("expected documentation placeholder endpoint error, got %v", err)
+	}
+}
+
 type cfgAccessRepo struct{ entry *access.DeviceAccess }
 
 func (r *cfgAccessRepo) Create(context.Context, access.CreateParams) (*access.DeviceAccess, error) {

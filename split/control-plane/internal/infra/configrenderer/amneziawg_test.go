@@ -1,6 +1,7 @@
 package configrenderer
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -44,5 +45,53 @@ func TestRenderAmneziaWG(t *testing.T) {
 	}
 	if !strings.Contains(cfg, "Jc = 4") || !strings.Contains(cfg, "I1 = <r 2><b 0x8580>") {
 		t.Fatal("missing amnezia fields")
+	}
+}
+
+func TestRenderAmneziaWG_RejectsDocumentationEndpoint(t *testing.T) {
+	r := NewAmneziaWGRenderer()
+	_, err := r.RenderAmneziaWG(app.RenderAmneziaWGInput{
+		DevicePrivateKey: "priv",
+		ServerPublicKey:  "pub",
+		PresharedKey:     "psk",
+		AssignedIP:       "10.0.0.2/32",
+		EndpointHost:     "203.0.113.10",
+		EndpointPort:     51820,
+	})
+	if err == nil || !strings.Contains(err.Error(), "documentation placeholder") {
+		t.Fatalf("expected documentation placeholder validation error, got %v", err)
+	}
+}
+
+func TestRenderXrayReality_ProducesImportableJSONWithVLESSURI(t *testing.T) {
+	r := NewAmneziaWGRenderer()
+	cfg, err := r.RenderXrayReality(app.RenderXrayRealityInput{
+		DeviceID:    "dev-1",
+		ServerName:  "www.cloudflare.com",
+		ServerHost:  "vpn.example.com",
+		ServerPort:  8443,
+		UserUUID:    "11111111-1111-1111-1111-111111111111",
+		PublicKey:   "pubKey",
+		ShortID:     "0123456789abcdef",
+		Fingerprint: "chrome",
+		Flow:        "xtls-rprx-vision",
+	})
+	if err != nil {
+		t.Fatalf("render xray config failed: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(cfg), &parsed); err != nil {
+		t.Fatalf("expected valid json config, got error: %v", err)
+	}
+	exportBlock, ok := parsed["xray_export"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected xray_export block in config: %s", cfg)
+	}
+	uri := strings.TrimSpace(exportBlock["uri"].(string))
+	if !strings.HasPrefix(uri, "vless://11111111-1111-1111-1111-111111111111@vpn.example.com:8443?") {
+		t.Fatalf("unexpected uri host/port/uuid: %s", uri)
+	}
+	if !strings.Contains(uri, "security=reality") || !strings.Contains(uri, "pbk=pubKey") || !strings.Contains(uri, "sid=0123456789abcdef") {
+		t.Fatalf("uri misses required reality fields: %s", uri)
 	}
 }
