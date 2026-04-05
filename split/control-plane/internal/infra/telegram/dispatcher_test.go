@@ -182,13 +182,47 @@ func TestHandleGetConfig_DefaultProtocolXray(t *testing.T) {
 	svc.handleGetConfig(context.Background(), 100, "u1")
 
 	if len(bot.messages) < 2 {
-		t.Fatalf("expected xray + speed prompt messages, got %+v", bot.messages)
+		t.Fatalf("expected xray delivery + speed prompt messages, got %+v", bot.messages)
 	}
-	if !strings.Contains(bot.messages[0].text, "vless://") {
-		t.Fatalf("expected first message to be xray link, got %q", bot.messages[0].text)
+	if !strings.Contains(bot.messages[0].text, "Health-конфиг (Xray) готов") {
+		t.Fatalf("expected first message to be xray document caption, got %q", bot.messages[0].text)
 	}
-	if !strings.Contains(bot.messages[1].text, "Speed") {
-		t.Fatalf("expected second message to offer speed config, got %q", bot.messages[1].text)
+	if !strings.Contains(bot.messages[1].text, "vless://") {
+		t.Fatalf("expected second message to include xray link, got %q", bot.messages[1].text)
+	}
+	if !strings.Contains(bot.messages[len(bot.messages)-1].text, "Speed") {
+		t.Fatalf("expected final message to offer speed config, got %q", bot.messages[len(bot.messages)-1].text)
+	}
+}
+
+func TestHandleGetConfig_XrayExporterFailureStillDeliversXrayDocument(t *testing.T) {
+	bot := &fakeBot{}
+	svc := &TelegramService{
+		Bot: bot,
+		GetGrantUC: &fakeGetGrant{grant: &accessgrant.AccessGrant{
+			ID: "g1", UserID: "u1", Status: accessgrant.StatusActive, ExpiresAt: time.Now().Add(24 * time.Hour),
+		}},
+		Devices: &fakeDevices{active: &device.Device{ID: "d1"}},
+		Accesses: &fakeAccesses{byIDMap: map[string]*access.DeviceAccess{
+			"ax": {ID: "ax", DeviceID: "d1", Protocol: "xray", ConfigBlobEncrypted: []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`)},
+			"aw": {ID: "aw", DeviceID: "d1", Protocol: "wireguard", VPNNodeID: "n1", ConfigBlobEncrypted: []byte("[Interface]\nPrivateKey = FSfGSg9HVUWcRaOzggEUxGafoi8I8JfemfSWLIUhxuI=\n[Peer]\nPublicKey = freshKey=\nPresharedKey = psk\n")},
+		}},
+		Nodes:           &fakeNodes{byID: map[string]*node.Node{"n1": {ID: "n1", ServerPublicKey: "freshKey="}}},
+		ConfigEncryptor: fakeEncryptor{},
+		XrayExporter:    &fakeXrayExporter{err: errors.New("boom")},
+	}
+
+	svc.handleGetConfig(context.Background(), 100, "u1")
+
+	joined := ""
+	for _, m := range bot.messages {
+		joined += m.text + "\n"
+	}
+	if !strings.Contains(joined, "Health-конфиг (Xray) готов") {
+		t.Fatalf("expected xray document caption, got %+v", bot.messages)
+	}
+	if strings.Contains(joined, "не применился на ноде") {
+		t.Fatalf("did not expect wireguard fallback path when xray document is delivered, got %+v", bot.messages)
 	}
 }
 
@@ -549,11 +583,15 @@ func (fakeEncryptor) Decrypt(v []byte) ([]byte, error) { return v, nil }
 
 type fakeXrayExporter struct {
 	link  string
+	err   error
 	calls int
 }
 
 func (f *fakeXrayExporter) ExportVLESSReality(ctx context.Context, in app.ExportXrayRealityInput) (string, error) {
 	f.calls++
+	if f.err != nil {
+		return "", f.err
+	}
 	if f.link != "" {
 		return f.link, nil
 	}

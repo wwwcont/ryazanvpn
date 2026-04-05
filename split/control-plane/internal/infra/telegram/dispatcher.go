@@ -1017,10 +1017,6 @@ func (s *TelegramService) sendHealthLink(ctx context.Context, chatID int64, user
 }
 
 func (s *TelegramService) trySendHealthLink(ctx context.Context, chatID int64, userID string) bool {
-	if s.XrayExporter == nil {
-		_ = s.Bot.SendMessage(ctx, chatID, "Экспорт Health-ссылки пока недоступен.", healthMenu())
-		return false
-	}
 	accessID, err := s.resolveActiveAccessIDByProtocol(ctx, userID, "xray")
 	if err != nil {
 		_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг пока недоступен. Вы можете использовать Speed.", healthMenu())
@@ -1028,42 +1024,13 @@ func (s *TelegramService) trySendHealthLink(ctx context.Context, chatID int64, u
 	}
 	d, err := s.Devices.GetActiveByUserID(ctx, userID)
 	if err != nil {
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", accessID, "protocol", "xray")
+		s.logConfigExportError(chatID, userID, "", accessID, "xray", err)
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось получить данные устройства.", healthMenu())
 		return false
 	}
 	s.logInfo("telegram.protocol_access.selected", "protocol", "xray", "access_id", accessID, "device_id", d.ID, "user_id", userID, "chat_id", chatID)
 	s.logInfo("telegram.config_flow.protocol_selected", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
-	if err != nil {
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-		_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг ещё не готов. Попробуйте позже.", healthMenu())
-		return false
-	}
-	uuid, err := parseXrayUUID(configPlain)
-	if err != nil {
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось извлечь параметры Health-конфига.", healthMenu())
-		return false
-	}
-	link, err := s.XrayExporter.ExportVLESSReality(ctx, app.ExportXrayRealityInput{
-		UUID:             uuid,
-		ServerHost:       s.XrayPublicHost,
-		Port:             s.XrayRealityPort,
-		RealityPublicKey: s.XrayPublicKey,
-		ServerName:       s.XrayServerName,
-		ShortID:          s.XrayShortID,
-		Label:            "RyazanVPN Health",
-	})
-	if err != nil {
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось сформировать Health-ссылку.", healthMenu())
-		return false
-	}
-	_ = s.Bot.SendMessage(ctx, chatID, "Ключ/ссылка Health (Xray Reality):\n```\n"+link+"\n```", healthMenu())
-	s.logInfo("telegram.delivery.vless_link", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-	s.logInfo("telegram.config_flow.export_xray.success", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "xray")
-	return true
+	return s.sendXrayConfigForTelegram(ctx, chatID, userID, accessID, d.ID, healthMenu())
 }
 
 func (s *TelegramService) sendHealthHowTo(ctx context.Context, chatID int64) {
@@ -1476,7 +1443,9 @@ func (s *TelegramService) sendConfigDocumentByAccessID(ctx context.Context, chat
 		return
 	}
 	if strings.EqualFold(strings.TrimSpace(acc.Protocol), "xray") {
-		_ = s.Bot.SendMessage(ctx, chatID, "Для Health используйте «Показать ссылку» — .conf для Xray не отправляется.", healthMenu())
+		if !s.sendXrayConfigForTelegram(ctx, chatID, userID, accessID, "", healthMenu()) {
+			_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг пока недоступен. Попробуйте позже.", healthMenu())
+		}
 		return
 	}
 	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
@@ -1573,7 +1542,7 @@ func (s *TelegramService) sendDefaultVPNKey(ctx context.Context, chatID int64, u
 	d, err := s.Devices.GetActiveByUserID(ctx, userID)
 	if err != nil {
 		s.logErr("load device for defaultvpn", err)
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", "", "access_id", accessID, "protocol", "wireguard")
+		s.logConfigExportError(chatID, userID, "", accessID, "wireguard", err)
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось получить данные устройства.", configReadyMenu())
 		return
 	}
@@ -1591,13 +1560,88 @@ func (s *TelegramService) sendDefaultVPNKey(ctx context.Context, chatID int64, u
 	})
 	if err != nil {
 		s.logErr("export defaultvpn key", err)
-		s.logInfo("telegram.config_flow.export.error", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "wireguard")
+		s.logConfigExportError(chatID, userID, d.ID, accessID, "wireguard", err)
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось сформировать DefaultVPN ключ.", configReadyMenu())
 		return
 	}
 	_ = s.Bot.SendMessage(ctx, chatID, "Ключ для DefaultVPN:\n`"+key+"`", configReadyMenu())
 	s.logInfo("telegram.config_flow.export_amnezia.success", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "wireguard")
 	s.logInfo("telegram.delivery.defaultvpn", "chat_id", chatID, "user_id", userID, "device_id", d.ID, "access_id", accessID, "protocol", "wireguard")
+}
+
+func (s *TelegramService) sendXrayConfigForTelegram(ctx context.Context, chatID int64, userID, accessID, deviceID string, markup *InlineKeyboardMarkup) bool {
+	configPlain, err := s.loadConfigPlaintext(ctx, accessID)
+	if err != nil {
+		s.logConfigExportError(chatID, userID, deviceID, accessID, "xray", err)
+		return false
+	}
+	if err := s.Bot.SendDocument(ctx, chatID, "rznvpn-xray.json", []byte(configPlain), "Health-конфиг (Xray) готов ✅", markup); err != nil {
+		s.logConfigExportError(chatID, userID, deviceID, accessID, "xray", err)
+		return false
+	}
+	s.logInfo("telegram.delivery.document", "chat_id", chatID, "user_id", userID, "device_id", deviceID, "access_id", accessID, "protocol", "xray", "filename", "rznvpn-xray.json")
+
+	link, err := s.exportXrayLink(ctx, configPlain)
+	if err != nil {
+		s.logConfigExportError(chatID, userID, deviceID, accessID, "xray", err)
+		s.sendXrayDownloadFallback(ctx, chatID, userID, deviceID, accessID, markup)
+		s.logInfo("telegram.config_flow.export_xray.success", "chat_id", chatID, "user_id", userID, "device_id", deviceID, "access_id", accessID, "protocol", "xray", "delivery_mode", "document_only")
+		return true
+	}
+	_ = s.Bot.SendMessage(ctx, chatID, "Ключ/ссылка Health (Xray Reality):\n```\n"+link+"\n```", markup)
+	s.logInfo("telegram.delivery.vless_link", "chat_id", chatID, "user_id", userID, "device_id", deviceID, "access_id", accessID, "protocol", "xray")
+	s.logInfo("telegram.config_flow.export_xray.success", "chat_id", chatID, "user_id", userID, "device_id", deviceID, "access_id", accessID, "protocol", "xray", "delivery_mode", "document_and_link")
+	return true
+}
+
+func (s *TelegramService) exportXrayLink(ctx context.Context, configPlain string) (string, error) {
+	if s.XrayExporter == nil {
+		return "", fmt.Errorf("xray exporter is not configured")
+	}
+	uuid, err := parseXrayUUID(configPlain)
+	if err != nil {
+		return "", fmt.Errorf("parse xray uuid: %w", err)
+	}
+	link, err := s.XrayExporter.ExportVLESSReality(ctx, app.ExportXrayRealityInput{
+		UUID:             uuid,
+		ServerHost:       s.XrayPublicHost,
+		Port:             s.XrayRealityPort,
+		RealityPublicKey: s.XrayPublicKey,
+		ServerName:       s.XrayServerName,
+		ShortID:          s.XrayShortID,
+		Label:            "RyazanVPN Health",
+	})
+	if err != nil {
+		return "", fmt.Errorf("export xray reality link: %w", err)
+	}
+	return link, nil
+}
+
+func (s *TelegramService) sendXrayDownloadFallback(ctx context.Context, chatID int64, userID, deviceID, accessID string, markup *InlineKeyboardMarkup) {
+	if s.Tokens == nil || strings.TrimSpace(s.DownloadBaseURL) == "" {
+		return
+	}
+	tokenValue, err := s.issueDownloadToken(ctx, accessID)
+	if err != nil {
+		s.logConfigExportError(chatID, userID, deviceID, accessID, "xray", fmt.Errorf("issue download token: %w", err))
+		return
+	}
+	base := strings.TrimRight(strings.TrimSpace(s.DownloadBaseURL), "/")
+	link := base + "/download/config/" + tokenValue
+	_ = s.Bot.SendMessage(ctx, chatID, "Health-конфиг создан. Если ссылка/ключ не применяются, скачайте готовый файл по ссылке:\n"+link, markup)
+	s.logInfo("telegram.delivery.download_link", "chat_id", chatID, "user_id", userID, "device_id", deviceID, "access_id", accessID, "protocol", "xray")
+}
+
+func (s *TelegramService) logConfigExportError(chatID int64, userID, deviceID, accessID, protocol string, err error) {
+	s.logInfo(
+		"telegram.config_flow.export.error",
+		"chat_id", chatID,
+		"user_id", userID,
+		"device_id", deviceID,
+		"access_id", accessID,
+		"protocol", protocol,
+		"error", err.Error(),
+	)
 }
 
 func parseXrayUUID(configPlain string) (string, error) {
