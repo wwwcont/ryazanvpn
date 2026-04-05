@@ -14,11 +14,6 @@ services:
       AMNEZIA_CONTAINER_NAME: ${AMNEZIA_CONTAINER_NAME:?AMNEZIA_CONTAINER_NAME is required}
       AMNEZIA_INTERFACE_NAME: ${AMNEZIA_INTERFACE_NAME:?AMNEZIA_INTERFACE_NAME is required}
       XRAY_CONTAINER_NAME: ${XRAY_CONTAINER_NAME:?XRAY_CONTAINER_NAME is required}
-    depends_on:
-      amnezia-awg:
-        condition: service_started
-      xray:
-        condition: service_started
     ports:
       - "8081:8081"
     volumes:
