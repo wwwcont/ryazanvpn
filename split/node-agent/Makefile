@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-ENV_FILE ?= .env.generated
+ENV_FILE ?= .env
 
 .PHONY: build test up down logs
 

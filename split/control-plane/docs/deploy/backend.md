@@ -12,7 +12,7 @@ Use `docker-compose.backend.yml` for centralized backend:
 ## Quick start
 
 ```bash
-cp deploy/env/backend.env.example .env.backend.generated
+cp deploy/env/backend.env.example .env
 ./scripts/bootstrap-backend.sh
 ```
 

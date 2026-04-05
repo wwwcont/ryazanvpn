@@ -17,7 +17,7 @@ RyazanVPN consists of:
 
 ## Node stack
 
-`docker-compose.node.yml` starts a self-contained stack:
+`docker-compose.yml` starts a self-contained stack:
 - `node-agent`
 - `amnezia-awg`
 - `xray`

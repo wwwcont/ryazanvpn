@@ -6,8 +6,8 @@
 ## Быстрый старт
 
 ```bash
-cp .env.example .env.generated
-# заполните секреты и URL в .env.generated
+cp .env.example .env
+# заполните секреты и URL в .env
 make up
 ```
 

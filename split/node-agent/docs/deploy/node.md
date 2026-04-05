@@ -2,7 +2,7 @@
 
 ## Stack mode
 
-Use `docker-compose.node.yml` on each VPN node host.
+Use `docker-compose.yml` on each VPN node host.
 Node stack includes:
 - `node-agent`
 - `amnezia-awg`
@@ -11,7 +11,7 @@ Node stack includes:
 ## Quick start
 
 ```bash
-cp deploy/env/node.env.example .env.node.generated
+cp deploy/env/node.env.example .env
 # fill NODE_ID, NODE_TOKEN, CONTROL_PLANE_BASE_URL, AGENT_HMAC_SECRET
 ./scripts/bootstrap-node.sh
 ```

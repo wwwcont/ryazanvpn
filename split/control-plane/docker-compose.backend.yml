@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
-    env_file: [.env.backend.generated]
+    env_file: [.env]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -22,7 +22,7 @@ services:
   migrate:
     image: migrate/migrate:v4.17.1
     restart: "no"
-    env_file: [.env.backend.generated]
+    env_file: [.env]
     command: ["-path", "/migrations", "-database", "${POSTGRES_URL}", "up"]
     volumes:
       - ./migrations:/migrations:ro
@@ -35,7 +35,7 @@ services:
       context: .
       args: { SERVICE: cmd/control-plane }
     restart: unless-stopped
-    env_file: [.env.backend.generated]
+    env_file: [.env]
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    env_file: [.env.backend.generated]
+    env_file: [.env]
     ports: ["80:80", "443:443"]
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro

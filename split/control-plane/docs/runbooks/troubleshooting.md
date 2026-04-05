@@ -40,8 +40,7 @@
 
 Что делать:
 1. Если нужно нестандартное имя контейнера, запускайте compose c env-файлом явно:
-   - `docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build`
-   - `docker compose --env-file .env.single.generated -f docker-compose.single.yml up -d --build`
+   - `docker compose --env-file .env -f docker-compose.yml up -d --build`
 2. Либо экспортируйте переменную в shell перед запуском: `export XRAY_CONTAINER_NAME=my-xray`.
 
 ## node-agent cannot exec docker

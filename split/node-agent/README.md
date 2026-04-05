@@ -6,7 +6,7 @@
 ## Быстрый старт
 
 ```bash
-cp .env.example .env.generated
+cp .env.example .env
 # заполните NODE_ID/NODE_TOKEN/CONTROL_PLANE_BASE_URL/AGENT_HMAC_SECRET и runtime поля
 make up
 ```

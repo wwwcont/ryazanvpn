@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-TARGET_ENV=".env.node.generated"
+TARGET_ENV=".env"
 EXAMPLE_ENV="deploy/env/node.env.example"
 AMNEZIA_CONF="deploy/node/amnezia/awg0.conf"
 XRAY_CONF="deploy/node/xray/config.json"
@@ -22,7 +22,7 @@ usage() {
 Usage: scripts/bootstrap-node.sh [options]
 
 Options:
-  --env-file <path>      Target env file (default: .env.node.generated)
+  --env-file <path>      Target env file (default: .env)
   --non-interactive      Do not prompt for missing values, fail instead
   --validate-only        Run preflight+validation only, do not start services
   --skip-up              Skip docker compose up (useful for tests)
@@ -257,7 +257,7 @@ main() {
   fi
 
   log "Starting node stack and auto-registration loop..."
-  ./scripts/compose-with-env.sh "$TARGET_ENV" -f docker-compose.node.yml up -d --build
+  ./scripts/compose-with-env.sh "$TARGET_ENV" -f docker-compose.yml up -d --build
 
   log "Bootstrap complete: node-agent is running and will self-register in control-plane using NODE_ID/NODE_TOKEN."
   log "Quick checks:"

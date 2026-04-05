@@ -30,11 +30,11 @@ cd ryazanvpn
 ./scripts/bootstrap-node.sh
 ```
 
-Скрипт создаст `.env.node.generated` и runtime-директории.
+Скрипт создаст `.env` и runtime-директории.
 
 ## Этап 4. Настройка env
 
-Откройте `.env.node.generated` и заполните:
+Откройте `.env` и заполните:
 - `NODE_ID`
 - `NODE_TOKEN`
 - `CONTROL_PLANE_BASE_URL`
@@ -48,13 +48,13 @@ cd ryazanvpn
 ## Этап 5. Запуск node stack
 
 ```bash
-docker compose --env-file .env.node.generated -f docker-compose.node.yml up -d --build
+docker compose --env-file .env -f docker-compose.yml up -d --build
 ```
 
 ## Этап 6. Проверка
 
 ```bash
-docker compose --env-file .env.node.generated -f docker-compose.node.yml ps
+docker compose --env-file .env -f docker-compose.yml ps
 curl http://localhost:8081/health
 curl http://localhost:8081/ready
 ```

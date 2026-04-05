@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-ENV_FILE="${1:-.env.node.generated}"
+ENV_FILE="${1:-.env}"
 CONF_PATH="${2:-deploy/node/amnezia/awg0.conf}"
 
 if [[ ! -f "$ENV_FILE" ]]; then

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-TARGET_ENV=".env.backend.generated"
+TARGET_ENV=".env"
 EXAMPLE_ENV="deploy/env/backend.env.example"
 
 if [[ ! -f "$TARGET_ENV" ]]; then
