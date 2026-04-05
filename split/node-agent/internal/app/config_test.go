@@ -98,3 +98,20 @@ func TestLoadConfigPrefersXraySourceConfigPath(t *testing.T) {
 		t.Fatalf("expected XRAY_API_INBOUND_TAG to be used, got %q", cfg.XrayAPIInboundTag)
 	}
 }
+
+func TestLoadConfigUsesNewXrayEnvKeys(t *testing.T) {
+	t.Setenv("HTTP_ADDR", ":18081")
+	t.Setenv("XRAY_API_SERVER", "127.0.0.1:12345")
+	t.Setenv("XRAY_INBOUND_TAG", "my-inbound")
+
+	cfg, err := LoadConfig("node-agent")
+	if err != nil {
+		t.Fatalf("LoadConfig(node-agent) returned error: %v", err)
+	}
+	if cfg.XrayAPIAddress != "127.0.0.1:12345" {
+		t.Fatalf("expected XRAY_API_SERVER to be used, got %q", cfg.XrayAPIAddress)
+	}
+	if cfg.XrayAPIInboundTag != "my-inbound" {
+		t.Fatalf("expected XRAY_INBOUND_TAG to be used, got %q", cfg.XrayAPIInboundTag)
+	}
+}

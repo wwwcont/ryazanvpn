@@ -507,6 +507,20 @@ func (r *AmneziaDockerRuntime) logAmneziaListenPort(ctx context.Context) error {
 
 var canonicalUUIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+type xrayInboundTemplate struct {
+	Tag      string
+	Protocol string
+	Listen   string
+	Port     int
+	Settings map[string]any
+}
+
+type xrayClientForADU struct {
+	Email string
+	ID    string
+	Flow  string
+}
+
 func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOperationRequest) error {
 	r.xrayMu.Lock()
 	defer r.xrayMu.Unlock()
@@ -525,7 +539,7 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 	}
 	accessEmail := strings.TrimSpace(req.DeviceAccessID)
 	if accessEmail == "" {
-		accessEmail = "access-" + uuid
+		return errors.New("xray access_id (email) is empty")
 	}
 	if err := r.detectXrayRestart(ctx); err != nil {
 		r.log("xray.runtime.restart.detect.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
@@ -541,10 +555,6 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		slog.String("container", r.cfg.XrayContainer),
 		slog.String("config_path", configPath),
 	)
-	if _, err := r.ensureXrayBootstrapUser(ctx, req.OperationID, uuid, true); err != nil {
-		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
-		return err
-	}
 	if err := r.ensureXrayAPIReady(ctx, req.OperationID); err != nil {
 		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
@@ -556,9 +566,39 @@ func (r *AmneziaDockerRuntime) applyXrayClient(ctx context.Context, req PeerOper
 		r.log("xray.api.add.success", slog.String("operation_id", req.OperationID), slog.String("device_access_id", req.DeviceAccessID), slog.Bool("idempotent", true))
 		return nil
 	}
-	cmdArgs := []string{"exec", r.cfg.XrayContainer, "xray", "api", "adu", "--server=" + r.xrayAPIAddress(), "--inboundTag=" + inboundTag, "--email=" + accessEmail, "--uuid=" + uuid, "--flow=" + flow}
-	r.log("xray.api.add.command", slog.String("operation_id", req.OperationID), slog.String("command", strings.Join(append([]string{r.cfg.DockerBinaryPath}, cmdArgs...), " ")))
-	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: cmdArgs, Timeout: r.commandTimeout()})
+	inbound, err := r.loadXrayInboundByTag(ctx, inboundTag)
+	if err != nil {
+		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	tmpJSON, err := buildXrayADUTempJSON(inbound, xrayClientForADU{
+		Email: accessEmail,
+		ID:    uuid,
+		Flow:  flow,
+	})
+	if err != nil {
+		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	localTemp, err := r.writeLocalTemp(tmpJSON)
+	if err != nil {
+		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
+		return err
+	}
+	defer os.Remove(localTemp)
+	remoteTemp := fmt.Sprintf("/tmp/ryazanvpn-xray-adu-%d.json", time.Now().UTC().UnixNano())
+	cpRes, err := r.runDockerCommand(ctx, "xray.api.add.copy_temp", req.OperationID, req.DeviceAccessID, uuid, inboundTag, []string{"cp", localTemp, r.cfg.XrayContainer + ":" + remoteTemp})
+	if err != nil {
+		return err
+	}
+	if cpRes.ExitCode != 0 {
+		return fmt.Errorf("copy xray adu temp json failed with exit_code=%d stderr=%s stdout=%s", cpRes.ExitCode, strings.TrimSpace(cpRes.Stderr), strings.TrimSpace(cpRes.Stdout))
+	}
+	defer func() {
+		_, _ = r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.XrayContainer, "rm", "-f", remoteTemp}, Timeout: r.commandTimeout()})
+	}()
+	cmdArgs := []string{"exec", r.cfg.XrayContainer, "xray", "api", "adu", "--server=" + r.xrayAPIAddress(), remoteTemp}
+	res, err := r.runDockerCommand(ctx, "xray.api.add.command", req.OperationID, req.DeviceAccessID, uuid, inboundTag, cmdArgs)
 	if err != nil {
 		r.log("xray.api.add.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
@@ -598,20 +638,15 @@ func (r *AmneziaDockerRuntime) revokeXrayClient(ctx context.Context, req PeerOpe
 	inboundTag := r.xrayInboundTag()
 	accessEmail := strings.TrimSpace(req.DeviceAccessID)
 	if accessEmail == "" {
-		accessEmail = "access-" + uuid
+		return errors.New("xray access_id (email) is empty")
 	}
 	r.log("xray.api.remove.start", slog.String("operation_id", req.OperationID), slog.String("access_id", req.DeviceAccessID), slog.String("device_access_id", req.DeviceAccessID), slog.String("uuid", uuid), slog.String("inbound_tag", inboundTag), slog.String("container", r.cfg.XrayContainer), slog.String("config_path", configPath))
-	if _, err := r.ensureXrayBootstrapUser(ctx, req.OperationID, uuid, false); err != nil {
-		r.log("xray.api.remove.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
-		return err
-	}
 	if err := r.ensureXrayAPIReady(ctx, req.OperationID); err != nil {
 		r.log("xray.api.remove.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
 	}
-	cmdArgs := []string{"exec", r.cfg.XrayContainer, "xray", "api", "rmu", "--server=" + r.xrayAPIAddress(), "--inboundTag=" + inboundTag, "--email=" + accessEmail}
-	r.log("xray.api.remove.command", slog.String("operation_id", req.OperationID), slog.String("command", strings.Join(append([]string{r.cfg.DockerBinaryPath}, cmdArgs...), " ")))
-	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: cmdArgs, Timeout: r.commandTimeout()})
+	cmdArgs := []string{"exec", r.cfg.XrayContainer, "xray", "api", "rmu", "--server=" + r.xrayAPIAddress(), "-tag=" + inboundTag, accessEmail}
+	res, err := r.runDockerCommand(ctx, "xray.api.remove.command", req.OperationID, req.DeviceAccessID, uuid, inboundTag, cmdArgs)
 	if err != nil {
 		r.log("xray.api.remove.error", slog.String("operation_id", req.OperationID), slog.String("error", err.Error()))
 		return err
@@ -638,6 +673,121 @@ func normalizeXrayUUID(raw string) (string, error) {
 		return "", fmt.Errorf("xray client id must be a canonical UUID, got %q", raw)
 	}
 	return strings.ToLower(uuid), nil
+}
+
+func (r *AmneziaDockerRuntime) loadXrayInboundByTag(ctx context.Context, inboundTag string) (xrayInboundTemplate, error) {
+	out, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"exec", r.cfg.XrayContainer, "cat", r.cfg.XrayConfigPath}, Timeout: r.commandTimeout()})
+	if err != nil {
+		return xrayInboundTemplate{}, err
+	}
+	if out.ExitCode != 0 {
+		return xrayInboundTemplate{}, fmt.Errorf("read xray config failed with exit_code=%d", out.ExitCode)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(out.Stdout), &cfg); err != nil {
+		return xrayInboundTemplate{}, err
+	}
+	return extractXrayInboundTemplate(cfg, inboundTag)
+}
+
+func extractXrayInboundTemplate(cfg map[string]any, inboundTag string) (xrayInboundTemplate, error) {
+	inbounds, ok := cfg["inbounds"].([]any)
+	if !ok {
+		return xrayInboundTemplate{}, errors.New("xray config inbounds is missing or invalid")
+	}
+	targetTag := strings.TrimSpace(inboundTag)
+	for _, raw := range inbounds {
+		inbound, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		tag := strings.TrimSpace(asString(inbound["tag"]))
+		if !strings.EqualFold(tag, targetTag) {
+			continue
+		}
+		protocol := strings.TrimSpace(asString(inbound["protocol"]))
+		if protocol == "" {
+			return xrayInboundTemplate{}, fmt.Errorf("xray inbound %q has empty protocol", targetTag)
+		}
+		port, ok := asInt(inbound["port"])
+		if !ok || port <= 0 {
+			return xrayInboundTemplate{}, fmt.Errorf("xray inbound %q has invalid or empty port", targetTag)
+		}
+		settings, ok := inbound["settings"].(map[string]any)
+		if !ok {
+			return xrayInboundTemplate{}, fmt.Errorf("xray inbound %q has invalid settings", targetTag)
+		}
+		return xrayInboundTemplate{
+			Tag:      tag,
+			Protocol: protocol,
+			Listen:   strings.TrimSpace(asString(inbound["listen"])),
+			Port:     port,
+			Settings: settings,
+		}, nil
+	}
+	return xrayInboundTemplate{}, fmt.Errorf("xray inbound with tag %q not found in source config", targetTag)
+}
+
+func buildXrayADUTempJSON(inbound xrayInboundTemplate, client xrayClientForADU) ([]byte, error) {
+	if strings.TrimSpace(inbound.Tag) == "" || strings.TrimSpace(inbound.Protocol) == "" || inbound.Port <= 0 {
+		return nil, errors.New("xray inbound template is incomplete for adu")
+	}
+	if strings.TrimSpace(client.Email) == "" || strings.TrimSpace(client.ID) == "" {
+		return nil, errors.New("xray adu client email/id is required")
+	}
+	clientObj := map[string]any{
+		"email": client.Email,
+		"id":    client.ID,
+	}
+	if strings.EqualFold(inbound.Protocol, "vless") && strings.TrimSpace(client.Flow) != "" {
+		clientObj["flow"] = strings.TrimSpace(client.Flow)
+	}
+	settings := map[string]any{
+		"clients": []any{clientObj},
+	}
+	if decryption := strings.TrimSpace(asString(inbound.Settings["decryption"])); decryption != "" {
+		settings["decryption"] = decryption
+	}
+	payloadInbound := map[string]any{
+		"tag":      inbound.Tag,
+		"protocol": inbound.Protocol,
+		"port":     inbound.Port,
+		"settings": settings,
+	}
+	if inbound.Listen != "" {
+		payloadInbound["listen"] = inbound.Listen
+	}
+	return json.Marshal(map[string]any{
+		"inbounds": []any{payloadInbound},
+	})
+}
+
+func (r *AmneziaDockerRuntime) runDockerCommand(ctx context.Context, logMsg, operationID, accessID, uuid, inboundTag string, cmdArgs []string) (shell.ExecResult, error) {
+	cmd := strings.Join(append([]string{r.cfg.DockerBinaryPath}, cmdArgs...), " ")
+	r.log(logMsg,
+		slog.String("operation_id", operationID),
+		slog.String("access_id", accessID),
+		slog.String("email", accessID),
+		slog.String("uuid", uuid),
+		slog.String("inbound_tag", inboundTag),
+		slog.String("command", cmd),
+	)
+	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: cmdArgs, Timeout: r.commandTimeout()})
+	if err != nil {
+		r.log(logMsg+".result", slog.String("operation_id", operationID), slog.String("error", err.Error()))
+		return shell.ExecResult{}, err
+	}
+	r.log(logMsg+".result",
+		slog.String("operation_id", operationID),
+		slog.Int("exit_code", res.ExitCode),
+		slog.String("stdout", strings.TrimSpace(res.Stdout)),
+		slog.String("stderr", strings.TrimSpace(res.Stderr)),
+		slog.String("access_id", accessID),
+		slog.String("email", accessID),
+		slog.String("uuid", uuid),
+		slog.String("inbound_tag", inboundTag),
+	)
+	return res, nil
 }
 
 func (r *AmneziaDockerRuntime) xrayAPIAddress() string {
@@ -802,31 +952,10 @@ func xrayCommandIsIdempotent(stdout, stderr, op string) bool {
 }
 
 func (r *AmneziaDockerRuntime) ensureXrayAPIReady(ctx context.Context, operationID string) error {
-	if err := r.pingXrayAPI(ctx); err == nil {
-		return nil
-	}
-	changed, err := r.ensureXrayManagementConfig(ctx, operationID)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		if pingErr := r.pingXrayAPI(ctx); pingErr != nil {
-			return fmt.Errorf("xray api is unavailable on %s and management config was not changed: %w", r.xrayAPIAddress(), pingErr)
-		}
-		return nil
-	}
-	r.log("xray.runtime.api.bootstrap.restart.start", slog.String("operation_id", operationID), slog.String("container", r.cfg.XrayContainer))
-	res, err := r.exec.Run(ctx, shell.ExecRequest{Bin: r.cfg.DockerBinaryPath, Args: []string{"restart", r.cfg.XrayContainer}, Timeout: r.commandTimeout()})
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("xray bootstrap restart failed with exit_code=%d", res.ExitCode)
-	}
-	r.log("xray.runtime.api.bootstrap.restart.success", slog.String("operation_id", operationID), slog.String("container", r.cfg.XrayContainer))
 	if err := r.pingXrayAPI(ctx); err != nil {
-		return fmt.Errorf("xray api is still unavailable after bootstrap restart: %w", err)
+		return fmt.Errorf("xray api is unavailable on %s: %w", r.xrayAPIAddress(), err)
 	}
+	r.log("xray.api.ready", slog.String("operation_id", operationID), slog.String("server", r.xrayAPIAddress()))
 	return nil
 }
 
@@ -1061,6 +1190,27 @@ func validateXrayConfig(cfg map[string]any) error {
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func asInt(v any) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, true
+	case int32:
+		return int(x), true
+	case int64:
+		return int(x), true
+	case float64:
+		return int(x), true
+	case json.Number:
+		n, err := x.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 func (r *AmneziaDockerRuntime) writeLocalTemp(content []byte) (string, error) {
