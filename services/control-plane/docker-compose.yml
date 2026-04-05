@@ -46,21 +46,21 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    env_file: [services/control-plane/.env.generated]
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - control_caddy_data:/data
-      - control_caddy_config:/config
-    depends_on:
-      - control-plane
+  #caddy:
+  #  image: caddy:2-alpine
+  #  restart: unless-stopped
+  #  env_file: [services/control-plane/.env.generated]
+  #  ports:
+  #    - "80:80"
+  #    - "443:443"
+  #  volumes:
+  #    - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #    - control_caddy_data:/data
+  #    - control_caddy_config:/config
+  #  depends_on:
+  #    - control-plane
 
 volumes:
   control_postgres_data:
-  control_caddy_data:
-  control_caddy_config:
+  #control_caddy_data:
+  #control_caddy_config:
