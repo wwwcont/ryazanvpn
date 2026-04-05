@@ -22,29 +22,39 @@
     +-------------------+
 ```
 
-## Текущая структура для разделения по сервисам
+## Текущая структура для физического split
 
-- `services/control-plane/` — всё для запуска и эксплуатации control-plane (свой `README`, `docker-compose.yml`, `.env.example`, `Makefile`).
-- `services/node-agent/` — всё для запуска и эксплуатации node-agent (свой `README`, `docker-compose.yml`, `.env.example`, `Makefile`).
+- `split/control-plane/` — готовый standalone проект для отдельного репозитория control-plane.
+- `split/node-agent/` — готовый standalone проект для отдельного репозитория node-agent.
 - `shared/contracts/` — общий контракт node <-> control-plane.
 
-## Где что запускать
+## Как запускать после разделения
 
-### Control-plane
+### Control-plane (в новом репозитории)
 
 ```bash
-cp services/control-plane/.env.example services/control-plane/.env.generated
-make -C services/control-plane up
+cp .env.example .env
+make up
 ```
 
-### Node-agent
+### Node-agent (в новом репозитории)
 
 ```bash
-cp services/node-agent/.env.example services/node-agent/.env.generated
-make -C services/node-agent up
+cp .env.example .env
+make up
 ```
 
 ## Важно
 
-- Это всё ещё единый monorepo, но operational артефакты разложены по сервисным директориям для дальнейшего физического split в отдельные git-репозитории.
-- Исторические compose/env в корне можно считать legacy-совместимостью; канонические entrypoints теперь в `services/*`.
+- Корневые legacy compose/env/Makefile/Dockerfile удалены, чтобы не было двусмысленности.
+- Канонические точки входа для разделения — только `split/*`.
+
+## Готовые standalone директории для split
+
+В репозитории добавлены две полностью копируемые директории:
+
+- `split/control-plane/` — заготовка отдельного репозитория control-plane.
+- `split/node-agent/` — заготовка отдельного репозитория node-agent.
+
+Обе директории содержат исходники, `Dockerfile`, `docker-compose.yml`, `Makefile`, `.env.example`.
+Их можно целиком перенести в новые репозитории и запускать независимо через `.env` в корне каждого нового репозитория.

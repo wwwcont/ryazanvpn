@@ -1,0 +1,33 @@
+name: ci-services
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  service-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [control-plane, node-agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build + test (service)
+        run: |
+          make -C services/${{ matrix.service }} build
+          make -C services/${{ matrix.service }} test
+
+  contracts-and-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Contract tests
+        run: go test ./internal/transport/httpcontrol -run 'TestNodeAgentAuthMiddleware_.*ProtocolVersion'
+      - name: Dependency boundary checks
+        run: ./scripts/check-dependency-boundaries.sh

@@ -1,0 +1,8 @@
+{$PUBLIC_DOMAIN:localhost} {
+    encode zstd gzip
+
+    @telegram path /internal/telegram/webhook
+    reverse_proxy @telegram control-plane:8080
+
+    reverse_proxy control-plane:8080
+}
