@@ -44,6 +44,8 @@ services:
         SERVICE: cmd/control-plane
     restart: unless-stopped
     env_file: [.env]
+    ports:
+      - "${CONTROL_PLANE_PUBLISHED_PORT:-127.0.0.1:8080:8080}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +67,8 @@ services:
   #    - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
   #    - control_caddy_data:/data
   #    - control_caddy_config:/config
+  #  networks:
+  #    - backend
   #  depends_on:
   #    - control-plane
 

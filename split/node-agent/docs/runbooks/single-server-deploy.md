@@ -47,3 +47,8 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "url=${PUBLIC_BASE_URL}/internal/telegram/webhook" \
   -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
 ```
+
+Если webhook не доходит и в логах `control-plane` тишина:
+- проверьте, что reverse-proxy (`caddy`/nginx) и `control-plane` подключены к одной Docker-сети `${RYAZANVPN_SHARED_NETWORK}`;
+- для встроенного `caddy` в `docker-compose.yml` сервис `caddy` должен быть в сети `backend` вместе с `control-plane`.
+- если `caddy` запущен на хосте (не в Docker), проксируйте на `127.0.0.1:8080` и проверьте, что опубликован порт `CONTROL_PLANE_PUBLISHED_PORT`.
