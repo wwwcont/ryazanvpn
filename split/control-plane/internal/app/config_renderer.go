@@ -21,6 +21,10 @@ type RenderXrayRealityInput struct {
 	ServerHost   string
 	ServerPort   int
 	UserUUID     string
+	PublicKey    string
+	ShortID      string
+	Fingerprint  string
+	Flow         string
 }
 
 type ConfigRenderer interface {
