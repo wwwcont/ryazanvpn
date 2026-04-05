@@ -336,9 +336,17 @@ func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRu
 	results := make([]map[string]any, 0)
 	for accessID, d := range desiredByAccess {
 		cur, exists := runtimeByAccess[accessID]
-		if exists && cur.PeerPublicKey == d.PeerPublicKey && cur.AllowedIP == d.AssignedIP {
+		isXray := strings.EqualFold(strings.TrimSpace(d.Protocol), "xray")
+		if exists && cur.PeerPublicKey == d.PeerPublicKey && cur.AllowedIP == d.AssignedIP && !isXray {
 			results = append(results, map[string]any{"access_id": accessID, "action": "noop"})
 			continue
+		}
+		if exists && isXray && cur.PeerPublicKey != "" && cur.PeerPublicKey != d.PeerPublicKey {
+			logger.Warn("xray.runtime.state.mismatch",
+				slog.String("access_id", accessID),
+				slog.String("runtime_peer_public_key", cur.PeerPublicKey),
+				slog.String("desired_peer_public_key", d.PeerPublicKey),
+			)
 		}
 		opID := fmt.Sprintf("reconcile-apply-%s-%d", accessID, time.Now().UTC().UnixNano())
 		_, err := rt.ApplyPeer(ctx, runtime.PeerOperationRequest{
@@ -497,14 +505,17 @@ func buildRuntime(cfg app.Config, logger *slog.Logger) (runtime.VPNRuntime, erro
 			slog.Bool("docker_binary_found", found),
 		)
 		rt := runtime.NewAmneziaDockerRuntime(logger, runtime.AmneziaDockerRuntimeConfig{
-			WorkDir:          cfg.RuntimeWorkDir,
-			DockerBinaryPath: resolved,
-			ContainerName:    cfg.AmneziaContainerName,
-			InterfaceName:    cfg.AmneziaInterfaceName,
-			ExpectedPort:     cfg.AmneziaPort,
-			XrayContainer:    cfg.XrayContainerName,
-			XrayConfigPath:   cfg.XrayConfigPath,
-			CommandTimeout:   cfg.RuntimeExecTimeout,
+			WorkDir:           cfg.RuntimeWorkDir,
+			DockerBinaryPath:  resolved,
+			ContainerName:     cfg.AmneziaContainerName,
+			InterfaceName:     cfg.AmneziaInterfaceName,
+			ExpectedPort:      cfg.AmneziaPort,
+			XrayContainer:     cfg.XrayContainerName,
+			XrayConfigPath:    cfg.XrayConfigPath,
+			XrayAPIAddress:    cfg.XrayAPIAddress,
+			XrayAPIInboundTag: cfg.XrayAPIInboundTag,
+			XrayClientFlow:    cfg.XrayClientFlow,
+			CommandTimeout:    cfg.RuntimeExecTimeout,
 		}, shell.NewOSExecutor(logger))
 		healthCtx, cancel := context.WithTimeout(context.Background(), cfg.RuntimeExecTimeout)
 		defer cancel()

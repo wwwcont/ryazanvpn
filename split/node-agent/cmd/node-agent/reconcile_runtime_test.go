@@ -100,3 +100,33 @@ func TestReconcileRuntime_PassesEndpointParamsToApply(t *testing.T) {
 		t.Fatalf("expected endpoint meta preshared_key to be passed, got %q", got)
 	}
 }
+
+func TestReconcileRuntime_ReappliesXrayPeersForRuntimeRestore(t *testing.T) {
+	rt := &testRuntime{
+		stats: []runtime.PeerStat{{
+			DeviceAccessID: "a-x-1",
+			Protocol:       "xray",
+			PeerPublicKey:  "11111111-1111-1111-1111-111111111111",
+			AllowedIP:      "",
+		}},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	desired := []struct {
+		AccessID            string         `json:"access_id"`
+		Protocol            string         `json:"protocol"`
+		PeerPublicKey       string         `json:"peer_public_key"`
+		AssignedIP          string         `json:"assigned_ip"`
+		PersistentKeepalive int            `json:"persistent_keepalive"`
+		EndpointParams      map[string]any `json:"endpoint_params"`
+	}{
+		{AccessID: "a-x-1", Protocol: "xray", PeerPublicKey: "11111111-1111-1111-1111-111111111111"},
+	}
+
+	_ = reconcileRuntime(context.Background(), logger, rt, desired)
+	if len(rt.applyCalls) != 1 {
+		t.Fatalf("expected xray apply to be re-triggered for runtime restore, got %d", len(rt.applyCalls))
+	}
+	if rt.applyCalls[0].Protocol != "xray" {
+		t.Fatalf("expected xray protocol apply, got %+v", rt.applyCalls[0])
+	}
+}

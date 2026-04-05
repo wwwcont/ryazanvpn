@@ -1,6 +1,38 @@
 {
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService"
+    ]
+  },
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "stats": {},
   "inbounds": [
     {
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    },
+    {
+      "tag": "vless-reality",
       "port": 8443,
       "protocol": "vless",
       "settings": {
@@ -28,7 +60,22 @@
   },
   "outbounds": [
     {
+      "tag": "api",
+      "protocol": "freedom"
+    },
+    {
       "protocol": "freedom"
     }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api"
+      }
+    ]
   ]
 }

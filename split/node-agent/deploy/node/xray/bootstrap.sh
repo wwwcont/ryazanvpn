@@ -81,10 +81,41 @@ if [ ! -f "$CONFIG_PATH" ]; then
   umask 077
   cat > "$CONFIG_PATH" <<EOF
 {
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService"
+    ]
+  },
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "stats": {},
   "log": {
     "loglevel": "warning"
   },
   "inbounds": [
+    {
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    },
     {
       "tag": "vless-reality",
       "listen": "0.0.0.0",
@@ -114,9 +145,24 @@ if [ ! -f "$CONFIG_PATH" ]; then
   ],
   "outbounds": [
     {
+      "tag": "api",
+      "protocol": "freedom"
+    },
+    {
       "protocol": "freedom",
       "tag": "direct"
     }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "api"
+        ],
+        "outboundTag": "api"
+      }
+    ]
   ]
 }
 EOF
