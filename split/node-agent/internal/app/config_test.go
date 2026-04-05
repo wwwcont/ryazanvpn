@@ -85,6 +85,7 @@ func TestLoadConfigPrefersXraySourceConfigPath(t *testing.T) {
 	t.Setenv("HTTP_ADDR", ":18081")
 	t.Setenv("XRAY_SOURCE_CONFIG_PATH", "/opt/amnezia/xray/server.json")
 	t.Setenv("XRAY_CONFIG_PATH", "/etc/xray/config.json")
+	t.Setenv("XRAY_API_INBOUND_TAG", "vless-in")
 
 	cfg, err := LoadConfig("node-agent")
 	if err != nil {
@@ -92,5 +93,8 @@ func TestLoadConfigPrefersXraySourceConfigPath(t *testing.T) {
 	}
 	if cfg.XrayConfigPath != "/opt/amnezia/xray/server.json" {
 		t.Fatalf("expected XRAY_SOURCE_CONFIG_PATH to be used, got %q", cfg.XrayConfigPath)
+	}
+	if cfg.XrayAPIInboundTag != "vless-in" {
+		t.Fatalf("expected XRAY_API_INBOUND_TAG to be used, got %q", cfg.XrayAPIInboundTag)
 	}
 }
