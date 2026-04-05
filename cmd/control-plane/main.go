@@ -23,6 +23,7 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/infra/db"
 	"github.com/wwwcont/ryazanvpn/internal/infra/logging"
 	"github.com/wwwcont/ryazanvpn/internal/infra/nodeclient"
+	"github.com/wwwcont/ryazanvpn/internal/infra/oplog"
 	pgrepo "github.com/wwwcont/ryazanvpn/internal/infra/repository/postgres"
 	"github.com/wwwcont/ryazanvpn/internal/infra/telegram"
 	"github.com/wwwcont/ryazanvpn/internal/infra/vpnkey"
@@ -55,6 +56,12 @@ func main() {
 
 	redisClient := cache.NewClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 	defer redisClient.Close()
+
+	opsLogStore, err := oplog.NewStore(cfg.OpsLogDir, cfg.OpsLogRetention)
+	if err != nil {
+		logger.Error("ops log store init failed", slog.Any("error", err))
+		os.Exit(1)
+	}
 
 	nodeRepo := pgrepo.NewNodeRepository(pg)
 	userRepo := pgrepo.NewUserRepository(pg)
@@ -202,22 +209,29 @@ func main() {
 	}
 
 	router := httpcontrol.NewRouter(httpcontrol.Options{
-		Logger:            logger,
-		PG:                pg,
-		RedisClient:       redisClient,
-		ReadinessTimeout:  cfg.ReadinessTimeout,
-		DownloadUC:        downloadUC,
-		AdminSecret:       cfg.AdminSecret,
-		AdminSecretHeader: cfg.AdminSecretHeader,
-		Nodes:             nodeRepo,
-		Users:             userRepo,
-		Devices:           deviceRepo,
-		InviteCodes:       inviteRepo,
-		AuditLogs:         auditRepo,
-		TelegramWebhook:   telegramWebhookHandler,
-		AgentHMACSecret:   cfg.AgentHMACSecret,
-		NodeRegisterToken: cfg.NodeRegistrationToken,
-		Finance:           financeSvc,
+		Logger:                   logger,
+		PG:                       pg,
+		RedisClient:              redisClient,
+		ReadinessTimeout:         cfg.ReadinessTimeout,
+		DownloadUC:               downloadUC,
+		AdminSecret:              cfg.AdminSecret,
+		AdminSecretHeader:        cfg.AdminSecretHeader,
+		Nodes:                    nodeRepo,
+		Users:                    userRepo,
+		Devices:                  deviceRepo,
+		InviteCodes:              inviteRepo,
+		AuditLogs:                auditRepo,
+		TelegramWebhook:          telegramWebhookHandler,
+		AgentHMACSecret:          cfg.AgentHMACSecret,
+		NodeRegisterToken:        cfg.NodeRegistrationToken,
+		Finance:                  financeSvc,
+		NodeLinkCapacityBPS:      cfg.NodeLinkCapacityBPS,
+		NodeThroughputSampleStep: cfg.NodeThroughputSampleStep,
+		NodeThroughputRetention:  cfg.NodeThroughputRetention,
+		NodeRateLimitPerMinute:   cfg.NodeRateLimitPerMinute,
+		AdminRateLimitPerMinute:  cfg.AdminRateLimitPerMinute,
+		DailyChargeKopecks:       cfg.DailyChargeKopecks,
+		OpsLog:                   opsLogStore,
 	})
 
 	srv := &http.Server{
@@ -244,12 +258,14 @@ func main() {
 	}.Run(workerCtx)
 
 	go app.TrafficCollectorWorker{
-		Logger:        logger,
-		Nodes:         nodeRepo,
-		Accesses:      accessRepo,
-		Traffic:       trafficRepo,
-		ClientFactory: nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
-		PollInterval:  1 * time.Minute,
+		Logger:          logger,
+		Nodes:           nodeRepo,
+		Accesses:        accessRepo,
+		Traffic:         trafficRepo,
+		ClientFactory:   nodeclient.TrafficFactory{Secret: cfg.NodeAgentSecret, Timeout: cfg.NodeAgentTimeout, MaxRetries: cfg.NodeAgentRetries},
+		PollInterval:    cfg.NodeThroughputSampleStep,
+		SampleStep:      cfg.NodeThroughputSampleStep,
+		SampleRetention: cfg.NodeThroughputRetention,
 	}.Run(workerCtx)
 
 	go app.PeerConsistencyWorker{

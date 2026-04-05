@@ -48,3 +48,35 @@ func TestAddDailyUsageDelta_UsesBigintCasts(t *testing.T) {
 		}
 	}
 }
+
+func TestAddNodeThroughputSample_UsesInsertAndBps(t *testing.T) {
+	fake := &trFakeDB{}
+	repo := &TrafficRepository{q: fake}
+	err := repo.AddNodeThroughputSample(context.Background(), traffic.AddNodeThroughputSampleParams{
+		NodeID:        "n1",
+		CapturedAt:    time.Now().UTC(),
+		WindowSec:     60,
+		RXDelta:       600,
+		TXDelta:       300,
+		PeerCount:     10,
+		ResolvedPeers: 8,
+	})
+	if err != nil {
+		t.Fatalf("AddNodeThroughputSample failed: %v", err)
+	}
+	if len(fake.sqls) == 0 || !strings.Contains(fake.sqls[0], "INSERT INTO node_throughput_samples") {
+		t.Fatalf("expected throughput insert query, got: %+v", fake.sqls)
+	}
+}
+
+func TestCleanupNodeThroughputSamples_UsesDeleteByCapturedAt(t *testing.T) {
+	fake := &trFakeDB{}
+	repo := &TrafficRepository{q: fake}
+	err := repo.CleanupNodeThroughputSamples(context.Background(), time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("CleanupNodeThroughputSamples failed: %v", err)
+	}
+	if len(fake.sqls) == 0 || !strings.Contains(fake.sqls[0], "DELETE FROM node_throughput_samples") {
+		t.Fatalf("expected cleanup delete query, got: %+v", fake.sqls)
+	}
+}

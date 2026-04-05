@@ -58,3 +58,63 @@ curl -fsS http://localhost:8081/health
 ```bash
 go test ./...
 ```
+
+## Billing model (MVP)
+
+- Биллинг считается **по устройствам**: `10 ₽/сутки` за каждое активное устройство пользователя.
+- Устройство считается биллингуемым, если у него есть хотя бы один `device_access` в статусе `active` или `suspended_nonpayment`.
+- Если активных устройств нет — суточного списания нет.
+- Активация invite-кода начисляет бонус `+250 ₽` (`25_000` копеек).
+
+## Device lifecycle и nonpayment suspend/resume
+
+- Поддерживаемые статусы `device_access`: `active`, `suspended_nonpayment`, `revoked` (+ технические `pending/error`).
+- При балансе `<= 0` пользователь переводится в nonpayment-состояние, активные доступы уходят в `suspended_nonpayment`.
+- При пополнении баланса `> 0` доступы автоматически возвращаются в `active`.
+- Suspend/resume выполняется без потери device/config metadata: reconcile/runtime возвращает peer’ы без полного перевыпуска устройства.
+
+## Telegram bot: команды и меню
+
+Поддерживаемые команды:
+- `/start`
+- `/menu`
+- `/balance`
+- `/devices`
+- `/config`
+- `/help`
+
+Главное меню пользователя:
+- Мой доступ
+- Мои устройства
+- Баланс
+- Пополнить / активировать код
+- Получить конфиг
+- Помощь
+
+Карточка устройства:
+- статус/дата создания/активные протоколы/участие в биллинге
+- перевыпуск WG/Xray конфига (без удаления устройства)
+- скачать WG/Xray
+- удалить устройство (ревокает все access и останавливает списание по устройству)
+
+### Что выставить в BotFather
+
+1. `/setcommands` — указать список команд выше.
+2. `/setdescription` — кратко: VPN-сервис с WireGuard/AmneziaWG и Xray Reality.
+3. `/setabouttext` — краткий onboarding + ежедневный биллинг.
+4. `/setmenubutton` — открыть web-app/commands (в зависимости от вашей схемы).
+
+## Metrics (admin/dashboard)
+
+Рекомендуемые метрики на дашборд:
+- Node: active users/devices, traffic 24h, current rx/tx rate, reconcile success/error.
+- User: today/7d/30d трафик, last activity, access status, оценка days remaining по балансу.
+- Для расчёта утилизации канала используйте `NODE_LINK_CAPACITY_BPS` (например, `1000000000` для 1 Gbit/s).
+- Для server-observed speed используется выборка `node_throughput_samples`:
+  - `current_bps_estimate`
+  - `median_bps_1h`
+  - `p95_bps_1h`
+  - `peak_bps_24h`
+- Ограничение хранения/шага выборки:
+  - `NODE_THROUGHPUT_SAMPLE_STEP` (по умолчанию `1m`)
+  - `NODE_THROUGHPUT_RETENTION` (по умолчанию `48h`)
