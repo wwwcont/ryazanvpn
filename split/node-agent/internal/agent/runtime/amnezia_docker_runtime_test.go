@@ -144,14 +144,13 @@ func TestAmneziaDockerRuntime_RevokePeerBuildsCommand(t *testing.T) {
 	}
 }
 
-func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientViaAPIWithoutRestart(t *testing.T) {
+func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientViaConfigAndRestarts(t *testing.T) {
 	workDir := t.TempDir()
 	config := `{"inbounds":[{"tag":"vless-reality","port":443,"listen":"0.0.0.0","protocol":"vless","settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443","serverNames":["google.com"],"privateKey":"test","shortIds":["0123456789abcdef"]}}}]}`
 	var stagedPayload string
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0}, // lsi
 			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
@@ -188,44 +187,36 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayAddsClientViaAPIWithoutRestart(t *tes
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(exec.calls) < 5 {
-		t.Fatalf("expected at least 5 docker calls, got %d", len(exec.calls))
+	if len(exec.calls) != 4 {
+		t.Fatalf("expected inspect + read + cp + restart calls, got %d", len(exec.calls))
 	}
 	if got := strings.Join(exec.calls[0].Args, " "); !strings.Contains(got, "inspect --type container --format {{.Id}}|{{.State.StartedAt}} amnezia-xray") {
 		t.Fatalf("unexpected restart detection args: %v", exec.calls[0].Args)
 	}
-	if got := strings.Join(exec.calls[1].Args, " "); !strings.Contains(got, "exec amnezia-xray xray api lsi --server=127.0.0.1:10085") {
-		t.Fatalf("unexpected api ping args: %v", exec.calls[1].Args)
+	if got := strings.Join(exec.calls[1].Args, " "); !strings.Contains(got, "exec amnezia-xray cat /opt/amnezia/xray/server.json") {
+		t.Fatalf("unexpected read args: %v", exec.calls[1].Args)
 	}
-	if got := strings.Join(exec.calls[2].Args, " "); !strings.Contains(got, "exec amnezia-xray cat /opt/amnezia/xray/server.json") {
-		t.Fatalf("unexpected read args: %v", exec.calls[2].Args)
-	}
-	if got := strings.Join(exec.calls[4].Args, " "); !strings.Contains(got, "exec amnezia-xray xray api adu --server=127.0.0.1:10085 /tmp/") {
-		t.Fatalf("unexpected api add args: %v", exec.calls[4].Args)
-	}
-	cpArgs := exec.calls[3].Args
+	cpArgs := exec.calls[2].Args
 	if len(cpArgs) < 3 || cpArgs[0] != "cp" || cpArgs[2] != "amnezia-xray:/opt/amnezia/xray/server.json" {
-		if len(cpArgs) < 3 || cpArgs[0] != "cp" || !strings.HasPrefix(cpArgs[2], "amnezia-xray:/tmp/") {
-			t.Fatalf("unexpected cp args: %v", cpArgs)
-		}
+		t.Fatalf("unexpected cp args: %v", cpArgs)
+	}
+	if got := strings.Join(exec.calls[3].Args, " "); got != "restart amnezia-xray" {
+		t.Fatalf("unexpected restart args: %v", exec.calls[3].Args)
 	}
 	if stagedPayload == "" {
 		t.Fatal("expected staged payload content to be captured")
 	}
 	text := stagedPayload
-	if !strings.Contains(text, `"port":443`) {
+	if !strings.Contains(text, `"port": 443`) {
 		t.Fatalf("expected inbound port to be preserved, got: %s", text)
 	}
-	if !strings.Contains(text, `"tag":"vless-reality"`) {
+	if !strings.Contains(text, `"tag": "vless-reality"`) {
 		t.Fatalf("expected inbound tag to be preserved, got: %s", text)
 	}
-	if !strings.Contains(text, `"id":"11111111-1111-1111-1111-111111111111"`) {
+	if !strings.Contains(text, `"id": "11111111-1111-1111-1111-111111111111"`) {
 		t.Fatalf("expected xray client id to be added, got: %s", text)
 	}
-	if !strings.Contains(text, `"email":"da-x"`) {
-		t.Fatalf("expected email to be access_id, got: %s", text)
-	}
-	if !strings.Contains(text, `"flow":"xtls-rprx-vision"`) {
+	if !strings.Contains(text, `"flow": "xtls-rprx-vision"`) {
 		t.Fatalf("expected xray client flow to be set, got: %s", text)
 	}
 }
@@ -257,39 +248,6 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayRejectsInvalidUUIDBeforeWrite(t *test
 	}
 }
 
-func TestAmneziaDockerRuntime_ApplyPeerXrayValidationFailsBeforeWrite(t *testing.T) {
-	exec := &amneziaFakeExecutor{
-		res: []shell.ExecResult{
-			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0},
-			{ExitCode: 0, Stdout: `{"inbounds":[{"tag":"vless-reality","protocol":"vless","settings":{"clients":[]}}]}`},
-		},
-	}
-	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
-		DockerBinaryPath: "/usr/bin/docker",
-		XrayContainer:    "ryazanvpn-xray",
-		XrayConfigPath:   "/etc/xray/config.json",
-		CommandTimeout:   time.Second,
-	}, exec)
-
-	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
-		OperationID:    "op-x",
-		DeviceAccessID: "da-x",
-		Protocol:       "xray",
-		PeerPublicKey:  "11111111-1111-1111-8111-111111111111",
-		AssignedIP:     "10.0.0.5",
-	})
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-	if !strings.Contains(err.Error(), "invalid or empty port") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(exec.calls) != 3 {
-		t.Fatalf("expected inspect + ping + read call before failure, got %d", len(exec.calls))
-	}
-}
-
 func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	workDir := t.TempDir()
 	config := `{"inbounds":[{"tag":"vless-reality","listen":"0.0.0.0","port":8443,"protocol":"vless","settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"www.cloudflare.com:443"}}}],"outbounds":[{"protocol":"freedom"}]}`
@@ -297,7 +255,6 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0},
 			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
@@ -329,7 +286,7 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayMatchesInboundByTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stagedPayload, `"id":"11111111-1111-1111-1111-111111111111"`) {
+	if !strings.Contains(stagedPayload, `"id": "11111111-1111-1111-1111-111111111111"`) {
 		t.Fatalf("expected xray client id to be added by tag match, got: %s", stagedPayload)
 	}
 }
@@ -367,7 +324,6 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayFailsWhenSourceConfigMissing(t *testi
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0},
 			{ExitCode: 1},
 		},
 	}
@@ -391,15 +347,17 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayFailsWhenSourceConfigMissing(t *testi
 	if !strings.Contains(err.Error(), "read xray config failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(exec.calls) != 3 {
-		t.Fatalf("expected restart detect + ping + read call, got %d", len(exec.calls))
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected restart detect + read call, got %d", len(exec.calls))
 	}
 }
 
-func TestAmneziaDockerRuntime_RevokePeerXrayRemovesClientViaAPIWithoutRestart(t *testing.T) {
+func TestAmneziaDockerRuntime_RevokePeerXrayRemovesClientViaConfigAndRestarts(t *testing.T) {
+	config := `{"inbounds":[{"tag":"vless-reality","port":443,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443"}}}]}`
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
+			{ExitCode: 0, Stdout: config},
 			{ExitCode: 0},
 			{ExitCode: 0},
 		},
@@ -421,24 +379,21 @@ func TestAmneziaDockerRuntime_RevokePeerXrayRemovesClientViaAPIWithoutRestart(t 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(exec.calls) != 3 {
-		t.Fatalf("expected inspect/api-ping/api-remove docker calls, got %d", len(exec.calls))
+	if len(exec.calls) != 4 {
+		t.Fatalf("expected inspect/read/cp/restart docker calls, got %d", len(exec.calls))
 	}
-	if got := strings.Join(exec.calls[2].Args, " "); !strings.Contains(got, "exec amnezia-xray xray api rmu --server=127.0.0.1:10085 -tag=vless-reality da-x") {
-		t.Fatalf("unexpected api remove args: %v", exec.calls[2].Args)
-	}
-	for _, call := range exec.calls {
-		if strings.Contains(strings.Join(call.Args, " "), " restart ") {
-			t.Fatalf("unexpected restart call: %v", call.Args)
-		}
+	if got := strings.Join(exec.calls[3].Args, " "); got != "restart amnezia-xray" {
+		t.Fatalf("expected restart call, got: %v", exec.calls[3].Args)
 	}
 }
 
-func TestAmneziaDockerRuntime_ApplyPeerXrayDoesNotRestartOnAPIUnavailable(t *testing.T) {
+func TestAmneziaDockerRuntime_ApplyPeerXrayFallbackToSingleVlessInbound(t *testing.T) {
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 1, Stderr: "failed to dial 127.0.0.1:10085"},
+			{ExitCode: 0, Stdout: `{"inbounds":[{"tag":"custom","port":443,"protocol":"vless","settings":{"clients":[],"decryption":"none"},"streamSettings":{"security":"reality","realitySettings":{"dest":"google.com:443"}}}]}`},
+			{ExitCode: 0},
+			{ExitCode: 0},
 		},
 	}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
@@ -449,78 +404,26 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayDoesNotRestartOnAPIUnavailable(t *tes
 	}, exec)
 
 	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
-		OperationID:    "op-no-restart",
+		OperationID:    "op-fallback",
 		DeviceAccessID: "da-bootstrap",
 		Protocol:       "xray",
 		PeerPublicKey:  "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
 		AssignedIP:     "10.0.0.9",
 	})
-	if err == nil {
-		t.Fatal("expected API unavailable error")
-	}
-	for _, call := range exec.calls {
-		if strings.Contains(strings.Join(call.Args, " "), "restart amnezia-xray") {
-			t.Fatalf("unexpected restart call: %v", call.Args)
-		}
-	}
-}
-
-func TestBuildXrayADUTempJSONFromInboundTemplate(t *testing.T) {
-	inbound := xrayInboundTemplate{
-		Tag:      "vless-reality",
-		Protocol: "vless",
-		Listen:   "0.0.0.0",
-		Port:     8443,
-		Settings: map[string]any{"decryption": "none"},
-	}
-	raw, err := buildXrayADUTempJSON(inbound, xrayClientForADU{
-		Email: "access-1",
-		ID:    "11111111-1111-1111-1111-111111111111",
-		Flow:  "xtls-rprx-vision",
-	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	text := string(raw)
-	for _, needle := range []string{
-		`"inbounds":[`,
-		`"tag":"vless-reality"`,
-		`"protocol":"vless"`,
-		`"port":8443`,
-		`"email":"access-1"`,
-		`"id":"11111111-1111-1111-1111-111111111111"`,
-	} {
-		if !strings.Contains(text, needle) {
-			t.Fatalf("expected %q in payload, got %s", needle, text)
-		}
-	}
-}
-
-func TestExtractXrayInboundTemplateByTag(t *testing.T) {
-	cfg := map[string]any{
-		"inbounds": []any{
-			map[string]any{"tag": "api", "protocol": "dokodemo-door", "port": 10085, "settings": map[string]any{}},
-			map[string]any{"tag": "vless-reality", "protocol": "vless", "port": 8443, "settings": map[string]any{"decryption": "none"}},
-		},
-	}
-	inbound, err := extractXrayInboundTemplate(cfg, "vless-reality")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if inbound.Tag != "vless-reality" || inbound.Protocol != "vless" || inbound.Port != 8443 {
-		t.Fatalf("unexpected inbound template: %+v", inbound)
+	if got := strings.Join(exec.calls[3].Args, " "); got != "restart amnezia-xray" {
+		t.Fatalf("expected restart call, got: %v", exec.calls[3].Args)
 	}
 }
 
 func TestAmneziaDockerRuntime_ApplyPeerXrayDuplicateAddIsIdempotent(t *testing.T) {
-	config := `{"inbounds":[{"tag":"vless-reality","port":443,"protocol":"vless","settings":{"clients":[],"decryption":"none"}}]}`
+	config := `{"inbounds":[{"tag":"vless-reality","port":443,"protocol":"vless","settings":{"clients":[{"id":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","flow":"xtls-rprx-vision"}],"decryption":"none"}}]}`
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0},
 			{ExitCode: 0, Stdout: config},
-			{ExitCode: 0},
-			{ExitCode: 1, Stderr: "user already exists"},
 		},
 	}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
@@ -539,14 +442,17 @@ func TestAmneziaDockerRuntime_ApplyPeerXrayDuplicateAddIsIdempotent(t *testing.T
 	if err != nil {
 		t.Fatalf("duplicate add should be idempotent, got: %v", err)
 	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected inspect + read only for idempotent add, got %d", len(exec.calls))
+	}
 }
 
 func TestAmneziaDockerRuntime_RevokePeerXrayMissingUserIsIdempotent(t *testing.T) {
+	config := `{"inbounds":[{"tag":"vless-reality","port":443,"protocol":"vless","settings":{"clients":[],"decryption":"none"}}]}`
 	exec := &amneziaFakeExecutor{
 		res: []shell.ExecResult{
 			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
-			{ExitCode: 0},
-			{ExitCode: 1, Stderr: "not found"},
+			{ExitCode: 0, Stdout: config},
 		},
 	}
 	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
@@ -564,5 +470,37 @@ func TestAmneziaDockerRuntime_RevokePeerXrayMissingUserIsIdempotent(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("missing user remove should be idempotent, got: %v", err)
+	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected inspect + read only for idempotent remove, got %d", len(exec.calls))
+	}
+}
+
+func TestAmneziaDockerRuntime_ApplyPeerXrayFailsOnAmbiguousFallbackInbound(t *testing.T) {
+	exec := &amneziaFakeExecutor{
+		res: []shell.ExecResult{
+			{ExitCode: 0, Stdout: "container-id|2026-01-01T00:00:00Z"},
+			{ExitCode: 0, Stdout: `{"inbounds":[{"tag":"a","protocol":"vless","settings":{"clients":[]}},{"tag":"b","protocol":"vless","settings":{"clients":[]}}]}`},
+		},
+	}
+	rt := NewAmneziaDockerRuntime(nil, AmneziaDockerRuntimeConfig{
+		DockerBinaryPath:  "/usr/bin/docker",
+		XrayContainer:     "amnezia-xray",
+		XrayConfigPath:    "/opt/amnezia/xray/server.json",
+		XrayAPIInboundTag: "missing-tag",
+		CommandTimeout:    time.Second,
+	}, exec)
+	_, err := rt.ApplyPeer(context.Background(), PeerOperationRequest{
+		OperationID:    "op-ambiguous",
+		DeviceAccessID: "da-x",
+		Protocol:       "xray",
+		PeerPublicKey:  "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+		AssignedIP:     "10.0.0.9",
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous inbound error")
+	}
+	if !strings.Contains(err.Error(), "fallback is ambiguous") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
