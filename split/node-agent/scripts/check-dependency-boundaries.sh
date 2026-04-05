@@ -10,18 +10,13 @@ fail() {
 }
 
 # Node-agent must not import control-plane transport package.
-if rg -n 'internal/transport/httpcontrol' cmd/node-agent internal/agent >/dev/null; then
+if rg -n 'internal/transport/httpcontrol' cmd/node-agent internal/agent internal/app >/dev/null; then
   fail "node-agent layer imports control-plane transport package"
 fi
 
-# Control-plane must not import node http transport package.
-if rg -n 'internal/transport/httpnode' cmd/control-plane internal/transport/httpcontrol >/dev/null; then
-  fail "control-plane layer imports node-agent http transport package"
-fi
-
-# Freeze-window guard: control-plane side must not import node-agent runtime/shell internals.
-if rg -n 'internal/agent/(runtime|shell)' cmd/control-plane internal/transport/httpcontrol internal/app >/dev/null; then
-  fail "control-plane layer imports node-agent runtime/shell package"
+# Node-agent repo must not contain control-plane entrypoint imports by mistake.
+if [ -d "cmd/control-plane" ]; then
+  fail "unexpected cmd/control-plane directory in node-agent split"
 fi
 
 # Shared contracts package must remain dependency-light (no internal imports).

@@ -9,11 +9,6 @@ fail() {
   exit 1
 }
 
-# Node-agent must not import control-plane transport package.
-if rg -n 'internal/transport/httpcontrol' cmd/node-agent internal/agent >/dev/null; then
-  fail "node-agent layer imports control-plane transport package"
-fi
-
 # Control-plane must not import node http transport package.
 if rg -n 'internal/transport/httpnode' cmd/control-plane internal/transport/httpcontrol >/dev/null; then
   fail "control-plane layer imports node-agent http transport package"
