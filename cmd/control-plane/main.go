@@ -249,9 +249,12 @@ func main() {
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 	go app.NodeHealthWorker{
-		Logger:       logger,
-		Repo:         nodeRepo,
-		PollInterval: cfg.NodeHealthPollInterval,
+		Logger:            logger,
+		Repo:              nodeRepo,
+		PollInterval:      cfg.NodeHealthPollInterval,
+		CheckTimeout:      cfg.NodeHealthCheckTimeout,
+		MaxParallelChecks: cfg.NodeHealthMaxParallelChecks,
+		PollJitter:        cfg.NodeHealthPollJitter,
 		Client: &http.Client{
 			Timeout: cfg.NodeHealthCheckTimeout,
 		},

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
@@ -17,10 +19,14 @@ type NodeHealthRepo interface {
 }
 
 type NodeHealthWorker struct {
-	Logger       *slog.Logger
-	Repo         NodeHealthRepo
-	Client       *http.Client
-	PollInterval time.Duration
+	Logger            *slog.Logger
+	Repo              NodeHealthRepo
+	Client            *http.Client
+	PollInterval      time.Duration
+	CheckTimeout      time.Duration
+	MaxParallelChecks int
+	PollJitter        time.Duration
+	RandSource        *rand.Rand
 }
 
 func (w NodeHealthWorker) Run(ctx context.Context) {
@@ -48,6 +54,15 @@ func (w NodeHealthWorker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if d := w.nextJitterDelay(); d > 0 {
+				timer := time.NewTimer(d)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
 			w.poll(ctx, client)
 		}
 	}
@@ -61,23 +76,49 @@ func (w NodeHealthWorker) poll(ctx context.Context, client *http.Client) {
 	}
 
 	now := time.Now().UTC()
-	for _, n := range nodes {
-		healthy := checkNodeHealth(ctx, client, n.AgentBaseURL)
-		targetStatus := node.StatusDown
-		if healthy {
-			targetStatus = node.StatusActive
-		}
-
-		if n.Status == targetStatus {
-			continue
-		}
-
-		if err := w.Repo.UpdateHealth(ctx, n.ID, targetStatus, now); err != nil {
-			w.log("update node health failed", slog.String("node_id", n.ID), slog.Any("error", err))
-			continue
-		}
-		w.log("node health status changed", slog.String("node_id", n.ID), slog.String("status", targetStatus))
+	maxParallel := w.MaxParallelChecks
+	if maxParallel <= 0 {
+		maxParallel = 8
 	}
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		case sem <- struct{}{}:
+		}
+		wg.Add(1)
+		go func(n *node.Node) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			checkCtx := ctx
+			if w.CheckTimeout > 0 {
+				var cancel context.CancelFunc
+				checkCtx, cancel = context.WithTimeout(ctx, w.CheckTimeout)
+				defer cancel()
+			}
+			healthy := checkNodeHealth(checkCtx, client, n.AgentBaseURL)
+			targetStatus := node.StatusDown
+			if healthy {
+				targetStatus = node.StatusActive
+			}
+			if n.Status == targetStatus {
+				return
+			}
+			if err := w.Repo.UpdateHealth(ctx, n.ID, targetStatus, now); err != nil {
+				w.log("update node health failed", slog.String("node_id", n.ID), slog.Any("error", err))
+				return
+			}
+			w.log("node health status changed", slog.String("node_id", n.ID), slog.String("status", targetStatus))
+		}(n)
+	}
+	wg.Wait()
 }
 
 func checkNodeHealth(ctx context.Context, client *http.Client, agentBaseURL string) bool {
@@ -104,4 +145,16 @@ func (w NodeHealthWorker) log(msg string, attrs ...any) {
 		return
 	}
 	w.Logger.Info(msg, attrs...)
+}
+
+func (w NodeHealthWorker) nextJitterDelay() time.Duration {
+	jitter := w.PollJitter
+	if jitter <= 0 {
+		return 0
+	}
+	rng := w.RandSource
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+	}
+	return time.Duration(rng.Int63n(jitter.Nanoseconds() + 1))
 }
