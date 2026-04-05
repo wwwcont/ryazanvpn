@@ -89,6 +89,9 @@ func (r *cfgAccessRepo) GetActiveByDeviceID(context.Context, string) ([]*access.
 func (r *cfgAccessRepo) GetActiveByNodeAndAssignedIP(context.Context, string, string) (*access.DeviceAccess, error) {
 	return r.entry, nil
 }
+func (r *cfgAccessRepo) GetActiveByNodeAndPublicKey(context.Context, string, string) (*access.DeviceAccess, error) {
+	return r.entry, nil
+}
 func (r *cfgAccessRepo) ListActiveByNodeID(context.Context, string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{r.entry}, nil
 }

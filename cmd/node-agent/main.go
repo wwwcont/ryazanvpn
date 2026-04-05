@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +71,8 @@ func main() {
 		baseURL: strings.TrimRight(cfg.ControlPlaneBaseURL, "/"),
 		secret:  []byte(cfg.AgentHMACSecret),
 		client:  &http.Client{Timeout: cfg.NodeAgentTimeout},
+		nodeID:  cfg.NodeID,
+		token:   cfg.NodeToken,
 	}
 	loopCtx, loopCancel := context.WithCancel(context.Background())
 	defer loopCancel()
@@ -109,6 +113,8 @@ type controlPlaneClient struct {
 	baseURL string
 	secret  []byte
 	client  *http.Client
+	nodeID  string
+	token   string
 }
 
 func (c controlPlaneClient) post(ctx context.Context, path string, payload any) error {
@@ -121,6 +127,9 @@ func (c controlPlaneClient) post(ctx context.Context, path string, payload any) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(auth.HeaderTimestamp, ts)
 	req.Header.Set(auth.HeaderSignature, auth.Sign(c.secret, ts, body))
+	req.Header.Set("X-Request-Id", newRequestID())
+	req.Header.Set("X-Node-Id", c.nodeID)
+	req.Header.Set("X-Node-Token", c.token)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -134,7 +143,7 @@ func (c controlPlaneClient) post(ctx context.Context, path string, payload any) 
 }
 
 func (c controlPlaneClient) getDesired(ctx context.Context, nodeID string, nodeToken string) (*desiredStateResponse, error) {
-	path := c.baseURL + "/nodes/desired-state?node_id=" + nodeID + "&node_token=" + nodeToken
+	path := c.baseURL + "/nodes/desired-state?node_id=" + nodeID
 	ts := fmt.Sprintf("%d", time.Now().UTC().Unix())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -142,6 +151,9 @@ func (c controlPlaneClient) getDesired(ctx context.Context, nodeID string, nodeT
 	}
 	req.Header.Set(auth.HeaderTimestamp, ts)
 	req.Header.Set(auth.HeaderSignature, auth.Sign(c.secret, ts, nil))
+	req.Header.Set("X-Node-Id", nodeID)
+	req.Header.Set("X-Node-Token", nodeToken)
+	req.Header.Set("X-Request-Id", newRequestID())
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -173,7 +185,6 @@ type desiredStateResponse struct {
 func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config, rt runtime.VPNRuntime, cp controlPlaneClient) {
 	registerPayload := map[string]any{
 		"node_id":        cfg.NodeID,
-		"node_token":     cfg.NodeToken,
 		"node_name":      cfg.NodeName,
 		"agent_base_url": cfg.NodeAgentBaseURL,
 		"region":         cfg.NodeRegion,
@@ -219,7 +230,7 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 		if len(availableProtocols) == 0 {
 			availableProtocols = []string{"wireguard"}
 		}
-		if err := cp.post(ctx, "/nodes/heartbeat", map[string]any{"node_id": cfg.NodeID, "node_token": cfg.NodeToken, "status": healthStatus, "protocols": availableProtocols}); err != nil {
+		if err := cp.post(ctx, "/nodes/heartbeat", map[string]any{"node_id": cfg.NodeID, "status": healthStatus, "protocols": availableProtocols}); err != nil {
 			logger.Error("node heartbeat failed", slog.Any("error", err))
 		}
 
@@ -230,7 +241,7 @@ func runNodeControlLoop(ctx context.Context, logger *slog.Logger, cfg app.Config
 			return
 		}
 		results := reconcileRuntime(ctx, logger, rt, desired.Peers)
-		if err := cp.post(ctx, "/nodes/apply", map[string]any{"node_id": cfg.NodeID, "node_token": cfg.NodeToken, "results": results, "at": time.Now().UTC()}); err != nil {
+		if err := cp.post(ctx, "/nodes/apply", map[string]any{"node_id": cfg.NodeID, "results": results, "at": time.Now().UTC()}); err != nil {
 			logger.Error("apply report failed", slog.Any("error", err))
 		}
 	}
@@ -269,6 +280,14 @@ func containsProtocol(items []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func newRequestID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("req-%d", time.Now().UTC().UnixNano())
+	}
+	return "req-" + hex.EncodeToString(b[:]) + "-" + fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 }
 
 func reconcileRuntime(ctx context.Context, logger *slog.Logger, rt runtime.VPNRuntime, desired []struct {

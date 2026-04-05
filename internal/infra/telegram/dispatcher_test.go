@@ -38,6 +38,9 @@ func TestStartRegistersAndShowsMenu(t *testing.T) {
 	if !strings.Contains(bot.messages[0].text, "Баланс:") {
 		t.Fatalf("expected balance in main menu text, got %q", bot.messages[0].text)
 	}
+	if !strings.Contains(bot.messages[0].text, "@wzcont") {
+		t.Fatalf("expected support contact in main menu text, got %q", bot.messages[0].text)
+	}
 }
 
 func TestEveryTelegramSubmenuHasBackHome(t *testing.T) {
@@ -251,6 +254,51 @@ func TestAdminBalanceAdjust_ParsesRublesAndSendsKopecks(t *testing.T) {
 	}
 }
 
+func TestAdminDisableNode_NotifiesAffectedUsers(t *testing.T) {
+	bot := &fakeBot{}
+	svc := &TelegramService{
+		Bot:        bot,
+		States:     &MemoryStateStore{},
+		RegisterUC: fakeRegister{u: &user.User{ID: "admin-u"}},
+		AdminIDs:   map[int64]struct{}{900: {}},
+		Nodes: &fakeNodes{byID: map[string]*node.Node{
+			"n1": {ID: "n1", Name: "node-1", Status: node.StatusActive},
+		}},
+		Accesses: &fakeAccesses{byNode: []*access.DeviceAccess{
+			{ID: "a1", DeviceID: "d1", VPNNodeID: "n1", Status: access.StatusActive},
+		}},
+		Devices: &fakeDevices{active: &device.Device{ID: "d1", UserID: "u1"}},
+		Users: &fakeUsersRepo{byUsername: map[string]*user.User{
+			"alice": {ID: "u1", TelegramID: 1001, Username: "alice"},
+		}},
+	}
+
+	svc.HandleUpdate(context.Background(), Update{
+		CallbackQuery: &CallbackQuery{
+			ID:   "cb-1",
+			Data: cbNodeDisablePrefix + "n1",
+			From: User{ID: 900},
+			Message: &Message{
+				Chat: Chat{ID: 900},
+			},
+		},
+	})
+
+	if svc.Nodes.(*fakeNodes).byID["n1"].Status != node.StatusDraining {
+		t.Fatalf("expected node status draining, got %s", svc.Nodes.(*fakeNodes).byID["n1"].Status)
+	}
+	joined := ""
+	for _, m := range bot.messages {
+		joined += m.text + "\n"
+	}
+	if !strings.Contains(joined, "Нода выключена, перевыпустите доступ под новую ноду.") {
+		t.Fatalf("expected user notification in bot messages, got: %s", joined)
+	}
+	if !strings.Contains(joined, "Очередь migrate/reissue сформирована") {
+		t.Fatalf("expected queue summary in admin message, got: %s", joined)
+	}
+}
+
 type fakeBot struct{ messages []sentMessage }
 
 type sentMessage struct {
@@ -323,6 +371,11 @@ type fakeFinanceAdjust struct {
 func (f *fakeFinanceAdjust) AddManualAdjustment(ctx context.Context, userID string, amountKopecks int64, reference string) error {
 	f.lastUserID = userID
 	f.lastAmount = amountKopecks
+	return nil
+}
+func (f *fakeFinanceAdjust) SetBalance(ctx context.Context, userID string, targetBalanceKopecks int64, reference string) error {
+	f.lastUserID = userID
+	f.lastAmount = targetBalanceKopecks
 	return nil
 }
 
@@ -421,6 +474,7 @@ type fakeAccesses struct {
 	byID        *access.DeviceAccess
 	byIDMap     map[string]*access.DeviceAccess
 	actives     []*access.DeviceAccess
+	byNode      []*access.DeviceAccess
 	clearedIDs  []string
 	setBlobByID map[string][]byte
 }
@@ -478,11 +532,14 @@ func (f *fakeAccesses) GetActiveByDeviceID(ctx context.Context, deviceID string)
 	}
 	return []*access.DeviceAccess{}, nil
 }
+func (f *fakeAccesses) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
 func (f *fakeAccesses) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
 }
 func (f *fakeAccesses) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
-	return nil, nil
+	return f.byNode, nil
 }
 
 type fakeEncryptor struct{}
@@ -507,6 +564,13 @@ type fakeNodes struct {
 	byID map[string]*node.Node
 }
 
+func (f *fakeNodes) ListAll(ctx context.Context) ([]*node.Node, error) {
+	out := make([]*node.Node, 0, len(f.byID))
+	for _, n := range f.byID {
+		out = append(out, n)
+	}
+	return out, nil
+}
 func (f *fakeNodes) ListActive(ctx context.Context) ([]*node.Node, error) {
 	out := make([]*node.Node, 0, len(f.byID))
 	for _, n := range f.byID {
@@ -522,6 +586,18 @@ func (f *fakeNodes) GetByID(ctx context.Context, id string) (*node.Node, error) 
 		return n, nil
 	}
 	return nil, node.ErrNotFound
+}
+func (f *fakeNodes) UpdateStatus(ctx context.Context, id string, status string) error {
+	if f.byID == nil {
+		f.byID = map[string]*node.Node{}
+	}
+	n, ok := f.byID[id]
+	if !ok {
+		n = &node.Node{ID: id, Name: id}
+		f.byID[id] = n
+	}
+	n.Status = status
+	return nil
 }
 func (f *fakeNodes) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
 	return nil

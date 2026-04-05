@@ -1,0 +1,3 @@
+DROP TRIGGER IF EXISTS trg_node_throughput_samples_updated_at ON node_throughput_samples;
+DROP INDEX IF EXISTS idx_node_throughput_samples_node_captured;
+DROP TABLE IF EXISTS node_throughput_samples;

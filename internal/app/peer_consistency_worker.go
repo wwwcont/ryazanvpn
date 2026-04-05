@@ -81,6 +81,10 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 	}
 
 	seenAccessIDs := make(map[string]struct{}, len(runtimePeers))
+	controlPlaneMissing := 0
+	runtimeMissing := 0
+	staleNodeRefs := 0
+	reconciledStale := 0
 	for _, rp := range runtimePeers {
 		if strings.EqualFold(strings.TrimSpace(rp.Protocol), "xray") {
 			continue
@@ -90,12 +94,13 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 			if _, ok := dbByAccessID[id]; !ok {
 				found, err := w.Accesses.GetByID(ctx, id)
 				if err == nil && found != nil && found.VPNNodeID != nodeID {
-					w.logWarn("peer_consistency.stale_node_reference", "node_id", nodeID, "access_id", id, "expected_node_id", found.VPNNodeID, "allowed_ip", rp.AllowedIP)
-					w.logWarn("peer_consistency.skip_revoke_stale_node", "node_id", nodeID, "access_id", id)
+					staleNodeRefs++
 					continue
 				}
-				w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "access_id", id, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
-				w.tryReconcileMissing(ctx, nodeID, rp)
+				controlPlaneMissing++
+				if w.tryReconcileMissing(ctx, nodeID, rp) {
+					reconciledStale++
+				}
 				continue
 			}
 			seenAccessIDs[id] = struct{}{}
@@ -103,13 +108,29 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 		}
 
 		if strings.TrimSpace(rp.AllowedIP) == "" {
-			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "public_key", rp.PeerPublicKey)
-			w.tryReconcileMissing(ctx, nodeID, rp)
+			if pubKey := strings.TrimSpace(rp.PeerPublicKey); pubKey != "" {
+				if byKey, err := w.Accesses.GetActiveByNodeAndPublicKey(ctx, nodeID, pubKey); err == nil && byKey != nil {
+					seenAccessIDs[byKey.ID] = struct{}{}
+					continue
+				}
+			}
+			controlPlaneMissing++
+			if w.tryReconcileMissing(ctx, nodeID, rp) {
+				reconciledStale++
+			}
 			continue
 		}
 		if matched := dbByIP[rp.AllowedIP]; matched == nil {
-			w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "allowed_ip", rp.AllowedIP, "public_key", rp.PeerPublicKey)
-			w.tryReconcileMissing(ctx, nodeID, rp)
+			if pubKey := strings.TrimSpace(rp.PeerPublicKey); pubKey != "" {
+				if byKey, err := w.Accesses.GetActiveByNodeAndPublicKey(ctx, nodeID, pubKey); err == nil && byKey != nil {
+					seenAccessIDs[byKey.ID] = struct{}{}
+					continue
+				}
+			}
+			controlPlaneMissing++
+			if w.tryReconcileMissing(ctx, nodeID, rp) {
+				reconciledStale++
+			}
 		} else {
 			seenAccessIDs[matched.ID] = struct{}{}
 		}
@@ -119,22 +140,29 @@ func (w PeerConsistencyWorker) compareNodePeers(ctx context.Context, nodeID stri
 		if _, ok := seenAccessIDs[p.ID]; ok {
 			continue
 		}
-		w.logWarn("peer_consistency.runtime_missing", "node_id", nodeID, "access_id", p.ID, "assigned_ip", valuePtrOrDefault(p.AssignedIP, ""))
+		runtimeMissing++
+	}
+	if staleNodeRefs > 0 {
+		w.logWarn("peer_consistency.stale_node_reference", "node_id", nodeID, "count", fmt.Sprintf("%d", staleNodeRefs))
+	}
+	if controlPlaneMissing > 0 {
+		w.logWarn("peer_consistency.control_plane_missing", "node_id", nodeID, "count", fmt.Sprintf("%d", controlPlaneMissing), "reconciled", fmt.Sprintf("%d", reconciledStale))
+	}
+	if runtimeMissing > 0 {
+		w.logWarn("peer_consistency.runtime_missing", "node_id", nodeID, "count", fmt.Sprintf("%d", runtimeMissing))
 	}
 }
 
-func (w PeerConsistencyWorker) tryReconcileMissing(ctx context.Context, nodeID string, counter NodeTrafficCounter) {
+func (w PeerConsistencyWorker) tryReconcileMissing(ctx context.Context, nodeID string, counter NodeTrafficCounter) bool {
 	if w.Reconciler == nil {
-		return
+		return false
 	}
 	ok, err := w.Reconciler.ReconcileMissingPeer(ctx, nodeID, counter)
 	if err != nil {
 		w.logErr("peer_consistency.reconcile_failed", err)
-		return
+		return false
 	}
-	if ok {
-		w.logWarn("peer_consistency.reconciled_stale_peer", "node_id", nodeID, "access_id", strings.TrimSpace(counter.DeviceAccessID), "allowed_ip", strings.TrimSpace(counter.AllowedIP), "public_key", strings.TrimSpace(counter.PeerPublicKey))
-	}
+	return ok
 }
 
 func (w PeerConsistencyWorker) logErr(msg string, err error) {
