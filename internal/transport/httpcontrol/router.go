@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,7 +27,9 @@ import (
 	"github.com/wwwcont/ryazanvpn/internal/domain/invitecode"
 	"github.com/wwwcont/ryazanvpn/internal/domain/node"
 	"github.com/wwwcont/ryazanvpn/internal/domain/user"
+	"github.com/wwwcont/ryazanvpn/internal/infra/oplog"
 	"github.com/wwwcont/ryazanvpn/internal/transport/httpcommon"
+	"github.com/wwwcont/ryazanvpn/shared/contracts/nodeapi"
 	"log/slog"
 )
 
@@ -51,22 +55,29 @@ type AuditLogger interface {
 }
 
 type Options struct {
-	Logger            *slog.Logger
-	PG                *pgxpool.Pool
-	RedisClient       *redis.Client
-	ReadinessTimeout  time.Duration
-	DownloadUC        *app.DownloadDeviceConfigByToken
-	AdminSecret       string
-	AdminSecretHeader string
-	Nodes             NodeAdminReader
-	Users             UserAdminReader
-	Devices           DeviceAdminReader
-	InviteCodes       InviteCodeAdminRepo
-	AuditLogs         AuditLogger
-	TelegramWebhook   http.Handler
-	AgentHMACSecret   string
-	NodeRegisterToken string
-	Finance           *app.FinanceService
+	Logger                   *slog.Logger
+	PG                       *pgxpool.Pool
+	RedisClient              *redis.Client
+	ReadinessTimeout         time.Duration
+	DownloadUC               *app.DownloadDeviceConfigByToken
+	AdminSecret              string
+	AdminSecretHeader        string
+	Nodes                    NodeAdminReader
+	Users                    UserAdminReader
+	Devices                  DeviceAdminReader
+	InviteCodes              InviteCodeAdminRepo
+	AuditLogs                AuditLogger
+	TelegramWebhook          http.Handler
+	AgentHMACSecret          string
+	NodeRegisterToken        string
+	Finance                  *app.FinanceService
+	NodeLinkCapacityBPS      int64
+	NodeThroughputSampleStep time.Duration
+	NodeThroughputRetention  time.Duration
+	NodeRateLimitPerMinute   int
+	AdminRateLimitPerMinute  int
+	DailyChargeKopecks       int64
+	OpsLog                   *oplog.Store
 }
 
 var inviteCodePattern = regexp.MustCompile(`^\d{4}$`)
@@ -77,6 +88,7 @@ func NewRouter(opts Options) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(httpcommon.AccessLogMiddleware(opts.Logger))
+	r.Use(operationLogMiddleware(opts.OpsLog, "control-plane"))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]any{
@@ -153,16 +165,230 @@ func NewRouter(opts Options) http.Handler {
 			if capacity > 0 {
 				nodeLoad = float64(load) / float64(capacity)
 			}
+			var currentBps float64
+			var medianBps1h float64
+			var p95Bps1h float64
+			var peakBps24h float64
+			var peersTotal int
+			var peersResolved int
+			_ = opts.PG.QueryRow(r.Context(), `
+SELECT COALESCE((
+    SELECT throughput_bps
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0),
+COALESCE((
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '1 hour'
+), 0),
+COALESCE((
+    SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '1 hour'
+), 0),
+COALESCE((
+    SELECT MAX(throughput_bps)
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+      AND nts.captured_at >= NOW() - INTERVAL '24 hour'
+), 0),
+COALESCE((
+    SELECT peers_total
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0),
+COALESCE((
+    SELECT peers_resolved
+    FROM node_throughput_samples nts
+    WHERE nts.vpn_node_id = $1
+    ORDER BY nts.captured_at DESC
+    LIMIT 1
+), 0)`, id).Scan(&currentBps, &medianBps1h, &p95Bps1h, &peakBps24h, &peersTotal, &peersResolved)
+			util := utilizationPercent(currentBps, opts.NodeLinkCapacityBPS)
+			lowUtilAnomaly := isLowUtilizationAnomaly(currentBps, p95Bps1h, util)
 			items = append(items, map[string]any{
-				"id":             id,
-				"name":           name,
-				"status":         status,
-				"current_load":   load,
-				"user_capacity":  capacity,
-				"node_load":      nodeLoad,
-				"agent_base_url": agentURL,
-				"vpn_endpoint":   endpoint,
-				"last_seen_at":   lastSeen,
+				"id":                       id,
+				"name":                     name,
+				"status":                   status,
+				"current_load":             load,
+				"user_capacity":            capacity,
+				"node_load":                nodeLoad,
+				"agent_base_url":           agentURL,
+				"vpn_endpoint":             endpoint,
+				"last_seen_at":             lastSeen,
+				"current_bps_estimate":     currentBps,
+				"median_bps_1h":            medianBps1h,
+				"p95_bps_1h":               p95Bps1h,
+				"peak_bps_24h":             peakBps24h,
+				"runtime_peers_total":      peersTotal,
+				"runtime_peers_resolved":   peersResolved,
+				"link_utilization_percent": util,
+				"low_utilization_anomaly":  lowUtilAnomaly,
+				"heartbeat_fresh_seconds":  heartbeatFreshSeconds(lastSeen),
+			})
+		}
+		step := opts.NodeThroughputSampleStep
+		if step <= 0 {
+			step = time.Minute
+		}
+		retention := opts.NodeThroughputRetention
+		if retention <= 0 {
+			retention = 48 * time.Hour
+		}
+		respondJSON(w, http.StatusOK, map[string]any{
+			"items":               items,
+			"sample_step_seconds": int64(step.Seconds()),
+			"retention_seconds":   int64(retention.Seconds()),
+		})
+	})
+
+	r.Get("/api/v1/metrics/nodes/top-slow", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := opts.PG.Query(r.Context(), `
+WITH latest AS (
+	SELECT DISTINCT ON (vpn_node_id) vpn_node_id, throughput_bps, captured_at
+	FROM node_throughput_samples
+	ORDER BY vpn_node_id, captured_at DESC
+),
+p95_1h AS (
+	SELECT vpn_node_id, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY throughput_bps),0) AS p95_bps_1h
+	FROM node_throughput_samples
+	WHERE captured_at >= NOW() - INTERVAL '1 hour'
+	GROUP BY vpn_node_id
+)
+SELECT n.id::text, n.name, COALESCE(l.throughput_bps,0), COALESCE(p.p95_bps_1h,0), n.status, n.last_seen_at
+FROM vpn_nodes n
+LEFT JOIN latest l ON l.vpn_node_id = n.id
+LEFT JOIN p95_1h p ON p.vpn_node_id = n.id
+ORDER BY COALESCE(p.p95_bps_1h,0) DESC
+LIMIT 10`)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load slow nodes"})
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]any, 0)
+		for rows.Next() {
+			var id, name, status string
+			var currentBps, p95Bps float64
+			var lastSeen *time.Time
+			if err := rows.Scan(&id, &name, &currentBps, &p95Bps, &status, &lastSeen); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to scan slow nodes"})
+				return
+			}
+			util := utilizationPercent(currentBps, opts.NodeLinkCapacityBPS)
+			items = append(items, map[string]any{
+				"node_id":                  id,
+				"name":                     name,
+				"status":                   status,
+				"current_bps":              currentBps,
+				"p95_bps_1h":               p95Bps,
+				"link_utilization_percent": util,
+				"low_utilization_anomaly":  isLowUtilizationAnomaly(currentBps, p95Bps, util),
+				"heartbeat_fresh_seconds":  heartbeatFreshSeconds(lastSeen),
+			})
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"items": items})
+	})
+
+	r.Get("/api/v1/metrics/nodes/top-errors", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := opts.PG.Query(r.Context(), `
+SELECT n.id::text, n.name,
+COALESCE((
+	SELECT COUNT(*)
+	FROM node_apply_reports nar
+	WHERE nar.node_id = n.id::text
+	  AND nar.status = 'failed'
+	  AND nar.created_at >= NOW() - INTERVAL '24 hour'
+),0) AS apply_errors_24h,
+COALESCE((
+	SELECT COUNT(*)
+	FROM node_operations no
+	WHERE no.vpn_node_id = n.id
+	  AND no.status IN ('failed', 'cancelled')
+	  AND no.updated_at >= NOW() - INTERVAL '24 hour'
+),0) AS operation_errors_24h
+FROM vpn_nodes n
+ORDER BY (COALESCE((
+	SELECT COUNT(*) FROM node_apply_reports nar
+	WHERE nar.node_id = n.id::text AND nar.status='failed' AND nar.created_at >= NOW() - INTERVAL '24 hour'
+),0) + COALESCE((
+	SELECT COUNT(*) FROM node_operations no
+	WHERE no.vpn_node_id = n.id AND no.status IN ('failed', 'cancelled') AND no.updated_at >= NOW() - INTERVAL '24 hour'
+),0)) DESC
+LIMIT 10`)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load error nodes"})
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]any, 0)
+		for rows.Next() {
+			var id, name string
+			var applyErr, opErr int64
+			if err := rows.Scan(&id, &name, &applyErr, &opErr); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to scan error nodes"})
+				return
+			}
+			items = append(items, map[string]any{
+				"node_id":              id,
+				"name":                 name,
+				"apply_errors_24h":     applyErr,
+				"reconcile_errors_24h": opErr,
+				"total_errors_24h":     applyErr + opErr,
+			})
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"items": items})
+	})
+
+	r.Get("/api/v1/metrics/nodes/top-noisy", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := opts.PG.Query(r.Context(), `
+SELECT n.id::text, n.name,
+COALESCE((
+	SELECT COUNT(*)
+	FROM node_apply_reports nar
+	WHERE nar.node_id = n.id::text
+	  AND nar.created_at >= NOW() - INTERVAL '24 hour'
+),0) AS total_apply_24h,
+COALESCE((
+	SELECT COUNT(*)
+	FROM node_apply_reports nar
+	WHERE nar.node_id = n.id::text
+	  AND nar.status = 'failed'
+	  AND nar.created_at >= NOW() - INTERVAL '24 hour'
+),0) AS failed_apply_24h
+FROM vpn_nodes n
+ORDER BY failed_apply_24h DESC, total_apply_24h DESC
+LIMIT 10`)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load noisy nodes"})
+			return
+		}
+		defer rows.Close()
+		items := make([]map[string]any, 0)
+		for rows.Next() {
+			var id, name string
+			var totalApply, failedApply int64
+			if err := rows.Scan(&id, &name, &totalApply, &failedApply); err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to scan noisy nodes"})
+				return
+			}
+			rate := 0.0
+			if totalApply > 0 {
+				rate = float64(failedApply) / float64(totalApply)
+			}
+			items = append(items, map[string]any{
+				"node_id":             id,
+				"name":                name,
+				"total_apply_24h":     totalApply,
+				"failed_apply_24h":    failedApply,
+				"warn_error_rate_24h": rate,
 			})
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -184,10 +410,37 @@ func NewRouter(opts Options) http.Handler {
 			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load user 30d traffic"})
 			return
 		}
+		var today int64
+		if err := opts.PG.QueryRow(r.Context(), `SELECT COALESCE(SUM(tud.total_bytes),0) FROM traffic_usage_daily tud JOIN devices d ON d.id=tud.device_id WHERE d.user_id = $1 AND tud.usage_date = CURRENT_DATE`, uid).Scan(&today); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load user today traffic"})
+			return
+		}
+		var last7 int64
+		if err := opts.PG.QueryRow(r.Context(), `SELECT COALESCE(SUM(tud.total_bytes),0) FROM traffic_usage_daily tud JOIN devices d ON d.id=tud.device_id WHERE d.user_id = $1 AND tud.usage_date >= CURRENT_DATE - INTERVAL '6 day'`, uid).Scan(&last7); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load user 7d traffic"})
+			return
+		}
+		var balance int64
+		var billableDevices int64
+		var lastActivity *time.Time
+		if err := opts.PG.QueryRow(r.Context(), `SELECT balance_kopecks FROM users WHERE id=$1`, uid).Scan(&balance); err != nil {
+			respondJSON(w, http.StatusNotFound, map[string]any{"error": "user not found"})
+			return
+		}
+		_ = opts.PG.QueryRow(r.Context(), `SELECT COUNT(DISTINCT d.id) FROM devices d JOIN device_accesses da ON da.device_id=d.id WHERE d.user_id=$1 AND d.status='active' AND da.status IN ('active','suspended_nonpayment')`, uid).Scan(&billableDevices)
+		_ = opts.PG.QueryRow(r.Context(), `SELECT MAX(captured_at) FROM device_traffic_snapshots s JOIN devices d ON d.id=s.device_id WHERE d.user_id=$1`, uid).Scan(&lastActivity)
+		estDays := estimateDaysRemaining(balance, opts.DailyChargeKopecks, billableDevices)
+
 		respondJSON(w, http.StatusOK, map[string]any{
 			"user_id":                    uid,
+			"traffic_today_bytes":        today,
+			"traffic_last_7_days_bytes":  last7,
 			"total_traffic_bytes":        total,
 			"traffic_last_30_days_bytes": last30,
+			"last_activity_at":           lastActivity,
+			"estimated_days_remaining":   estDays,
+			"billable_devices":           billableDevices,
+			"balance_kopecks":            balance,
 			"avg_latency_ms":             nil,
 			"avg_speed_mbps":             nil,
 			"latency_status":             "not_available",
@@ -344,12 +597,19 @@ ORDER BY month DESC, tum.protocol`, uid)
 	})
 
 	r.Route("/nodes", func(nr chi.Router) {
-		nr.Use(nodeAgentAuthMiddleware(opts.AgentHMACSecret, opts.Logger, 5*time.Minute))
+		nr.Use(rateLimitMiddleware(newWindowRateLimiter(opts.NodeRateLimitPerMinute, time.Minute), func(r *http.Request) string {
+			nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+			if nodeID != "" {
+				return "node:" + nodeID
+			}
+			return "ip:" + clientIP(r)
+		}))
+		nr.Use(nodeIdentityMiddleware(opts.NodeRegisterToken))
+		nr.Use(nodeAgentAuthMiddleware(opts.AgentHMACSecret, opts.RedisClient, opts.Logger, 5*time.Minute, 5*time.Minute))
 
 		nr.Post("/register", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				NodeID       string   `json:"node_id"`
-				NodeToken    string   `json:"node_token"`
 				NodeName     string   `json:"node_name"`
 				AgentBaseURL string   `json:"agent_base_url"`
 				Region       string   `json:"region"`
@@ -361,13 +621,14 @@ ORDER BY month DESC, tum.protocol`, uid)
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" && strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(req.NodeID)
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			nodeName := strings.TrimSpace(req.NodeName)
@@ -423,7 +684,6 @@ ON CONFLICT (id) DO UPDATE SET
 		nr.Post("/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				NodeID    string   `json:"node_id"`
-				NodeToken string   `json:"node_token"`
 				Status    string   `json:"status"`
 				Protocols []string `json:"protocols"`
 			}
@@ -431,13 +691,14 @@ ON CONFLICT (id) DO UPDATE SET
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" && strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(req.NodeID)
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			status := "active"
@@ -455,14 +716,14 @@ ON CONFLICT (id) DO UPDATE SET
 		})
 
 		nr.Get("/desired-state", func(w http.ResponseWriter, r *http.Request) {
+			headerNodeID := nodeIDFromContext(r.Context())
 			nodeID := strings.TrimSpace(r.URL.Query().Get("node_id"))
-			nodeToken := strings.TrimSpace(r.URL.Query().Get("node_token"))
-			if opts.NodeRegisterToken != "" && nodeToken != strings.TrimSpace(opts.NodeRegisterToken) {
-				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-				return
-			}
 			if nodeID == "" {
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != nodeID {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
 				return
 			}
 			var nodeStatus string
@@ -535,9 +796,8 @@ WHERE da.vpn_node_id=$1
 
 		nr.Post("/apply", func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
-				NodeID    string `json:"node_id"`
-				NodeToken string `json:"node_token"`
-				Results   []struct {
+				NodeID  string `json:"node_id"`
+				Results []struct {
 					OperationID string `json:"operation_id"`
 					AccessID    string `json:"access_id"`
 					Action      string `json:"action"`
@@ -549,11 +809,14 @@ WHERE da.vpn_node_id=$1
 				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 				return
 			}
-			if opts.NodeRegisterToken != "" {
-				if strings.TrimSpace(req.NodeToken) != strings.TrimSpace(opts.NodeRegisterToken) {
-					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
-					return
-				}
+			headerNodeID := nodeIDFromContext(r.Context())
+			if strings.TrimSpace(req.NodeID) == "" {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "node_id is required"})
+				return
+			}
+			if headerNodeID == "" || headerNodeID != strings.TrimSpace(req.NodeID) {
+				respondJSON(w, http.StatusForbidden, map[string]any{"error": "node_id mismatch"})
+				return
 			}
 			for _, item := range req.Results {
 				status := "failed"
@@ -595,7 +858,61 @@ WHERE da.vpn_node_id=$1
 	})
 
 	r.Route("/admin", func(ar chi.Router) {
+		ar.Use(rateLimitMiddleware(newWindowRateLimiter(opts.AdminRateLimitPerMinute, time.Minute), func(r *http.Request) string {
+			return "ip:" + clientIP(r)
+		}))
 		ar.Use(adminAuthMiddleware(opts.AdminSecretHeader, opts.AdminSecret))
+
+		ar.Get("/logs/export", func(w http.ResponseWriter, r *http.Request) {
+			if opts.OpsLog == nil {
+				respondJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "ops log export is not configured"})
+				return
+			}
+			parseTs := func(v string) (time.Time, error) {
+				if strings.TrimSpace(v) == "" {
+					return time.Time{}, nil
+				}
+				return time.Parse(time.RFC3339, strings.TrimSpace(v))
+			}
+			from, err := parseTs(r.URL.Query().Get("from"))
+			if err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid from timestamp, expected RFC3339"})
+				return
+			}
+			to, err := parseTs(r.URL.Query().Get("to"))
+			if err != nil {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid to timestamp, expected RFC3339"})
+				return
+			}
+			limit := 5000
+			if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+				n, convErr := strconv.Atoi(raw)
+				if convErr != nil || n <= 0 {
+					respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid limit"})
+					return
+				}
+				limit = n
+			}
+			buf := &bytes.Buffer{}
+			written, err := opts.OpsLog.Export(r.Context(), buf, oplog.Filter{
+				From:    from,
+				To:      to,
+				Service: strings.TrimSpace(r.URL.Query().Get("service")),
+				NodeID:  strings.TrimSpace(r.URL.Query().Get("node_id")),
+				Level:   strings.TrimSpace(r.URL.Query().Get("level")),
+				Limit:   limit,
+			})
+			if err != nil {
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to export logs"})
+				return
+			}
+			filename := "ops-export-" + time.Now().UTC().Format("20060102T150405Z") + ".ndjson"
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+			w.Header().Set("X-Export-Count", strconv.Itoa(written))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(buf.Bytes())
+		})
 
 		ar.Get("/nodes", func(w http.ResponseWriter, r *http.Request) {
 			if opts.Nodes == nil {
@@ -784,7 +1101,38 @@ WHERE da.vpn_node_id=$1
 	return r
 }
 
-func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Duration) func(http.Handler) http.Handler {
+type contextKey string
+
+const (
+	contextNodeIDKey contextKey = "node_id"
+)
+
+func nodeIDFromContext(ctx context.Context) string {
+	raw, _ := ctx.Value(contextNodeIDKey).(string)
+	return strings.TrimSpace(raw)
+}
+
+func nodeIdentityMiddleware(expectedToken string) func(http.Handler) http.Handler {
+	normalized := strings.TrimSpace(expectedToken)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+			nodeToken := strings.TrimSpace(r.Header.Get("X-Node-Token"))
+			if nodeID == "" || nodeToken == "" {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing node identity headers"})
+				return
+			}
+			if normalized != "" && nodeToken != normalized {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid node token"})
+				return
+			}
+			ctx := context.WithValue(r.Context(), contextNodeIDKey, nodeID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func nodeAgentAuthMiddleware(secret string, redisClient *redis.Client, logger *slog.Logger, maxSkew time.Duration, replayTTL time.Duration) func(http.Handler) http.Handler {
 	key := []byte(strings.TrimSpace(secret))
 	if logger == nil {
 		logger = slog.Default()
@@ -793,8 +1141,22 @@ func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Du
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tsRaw := r.Header.Get(auth.HeaderTimestamp)
 			sigHex := r.Header.Get(auth.HeaderSignature)
+			reqID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+			protoVer := strings.TrimSpace(r.Header.Get(nodeapi.HeaderProtocolVersion))
 			if tsRaw == "" || sigHex == "" {
 				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing auth headers"})
+				return
+			}
+			if protoVer == "" {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing protocol version"})
+				return
+			}
+			if !nodeapi.IsSupportedProtocolVersion(protoVer) {
+				respondJSON(w, http.StatusUpgradeRequired, map[string]any{"error": "unsupported protocol version"})
+				return
+			}
+			if reqID == "" {
+				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "missing request id"})
 				return
 			}
 			ts, err := strconv.ParseInt(tsRaw, 10, 64)
@@ -819,9 +1181,135 @@ func nodeAgentAuthMiddleware(secret string, logger *slog.Logger, maxSkew time.Du
 				respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid signature"})
 				return
 			}
+			if redisClient != nil {
+				nodeID := strings.TrimSpace(r.Header.Get("X-Node-Id"))
+				if nodeID == "" {
+					nodeID = "unknown"
+				}
+				replayKey := fmt.Sprintf("node:req:%s:%s", nodeID, reqID)
+				ok, err := redisClient.SetNX(r.Context(), replayKey, "1", replayTTL).Result()
+				if err != nil {
+					logger.Warn("request replay check failed", slog.Any("error", err), slog.String("path", r.URL.Path))
+					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "request replay check failed"})
+					return
+				}
+				if !ok {
+					respondJSON(w, http.StatusUnauthorized, map[string]any{"error": "replay detected"})
+					return
+				}
+			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type windowRateLimiter struct {
+	mu      sync.Mutex
+	limit   int
+	window  time.Duration
+	buckets map[string]windowCounter
+}
+
+type windowCounter struct {
+	count int
+	reset time.Time
+}
+
+func newWindowRateLimiter(limit int, window time.Duration) *windowRateLimiter {
+	if limit <= 0 {
+		limit = 60
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	return &windowRateLimiter{
+		limit:   limit,
+		window:  window,
+		buckets: make(map[string]windowCounter),
+	}
+}
+
+func (l *windowRateLimiter) allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	v, ok := l.buckets[key]
+	if !ok || now.After(v.reset) {
+		l.buckets[key] = windowCounter{count: 1, reset: now.Add(l.window)}
+		return true
+	}
+	if v.count >= l.limit {
+		return false
+	}
+	v.count++
+	l.buckets[key] = v
+	return true
+}
+
+func rateLimitMiddleware(l *windowRateLimiter, keyFn func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := keyFn(r)
+			if strings.TrimSpace(key) == "" {
+				key = "anonymous"
+			}
+			if !l.allow(key, time.Now().UTC()) {
+				respondJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate limit exceeded"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func operationLogMiddleware(store *oplog.Store, service string) func(http.Handler) http.Handler {
+	if store == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sw := &opStatusWriter{ResponseWriter: w, status: http.StatusOK}
+			start := time.Now().UTC()
+			next.ServeHTTP(sw, r)
+			severity := "info"
+			errCode := ""
+			if sw.status >= 500 {
+				severity = "error"
+				errCode = "E_HTTP_5XX"
+			} else if sw.status >= 400 {
+				severity = "warn"
+				errCode = "E_HTTP_4XX"
+			}
+			_ = store.Write(r.Context(), oplog.Record{
+				Timestamp: start,
+				Service:   service,
+				Severity:  severity,
+				ErrorCode: errCode,
+				RequestID: middleware.GetReqID(r.Context()),
+				NodeID:    strings.TrimSpace(r.Header.Get("X-Node-Id")),
+				UserID:    strings.TrimSpace(r.Header.Get("X-User-Id")),
+				DeviceID:  strings.TrimSpace(r.Header.Get("X-Device-Id")),
+				Message:   r.Method + " " + r.URL.Path,
+			})
+		})
+	}
+}
+
+type opStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *opStatusWriter) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && strings.TrimSpace(host) != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func adminAuthMiddleware(headerName, secret string) func(http.Handler) http.Handler {

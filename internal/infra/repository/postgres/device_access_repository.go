@@ -175,6 +175,25 @@ LIMIT 1`
 	return out, nil
 }
 
+func (r *DeviceAccessRepository) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	const query = `
+SELECT da.id::text, da.device_id::text, da.vpn_node_id::text, da.protocol, da.status, da.assigned_ip::text, da.preshared_key, da.config_blob_encrypted, da.granted_at, da.revoked_at, da.created_at, da.updated_at
+FROM device_accesses da
+JOIN devices d ON d.id = da.device_id
+WHERE da.vpn_node_id = $1 AND da.status = 'active' AND d.public_key = $2
+ORDER BY da.created_at DESC
+LIMIT 1`
+
+	out, err := scanAccess(r.q.QueryRow(ctx, query, nodeID, publicKey))
+	if isNoRows(err) {
+		return nil, access.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *DeviceAccessRepository) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
 	const query = `
 SELECT id::text, device_id::text, vpn_node_id::text, protocol, status, assigned_ip::text, preshared_key, config_blob_encrypted, granted_at, revoked_at, created_at, updated_at

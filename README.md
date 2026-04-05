@@ -1,60 +1,50 @@
-# RyazanVPN — production-minded MVP monorepo
+# RyazanVPN Architecture (monorepo)
 
-Сервисы:
-- `cmd/control-plane`
-- `cmd/node-agent`
+Этот репозиторий хранит общий код и инфраструктурные артефакты RyazanVPN.
 
-## Канонический production flow
+## Схема сервисов
 
-1. Вы **сами** поднимаете и обслуживаете runtime контейнеры Amnezia/Xray.
-2. В `.env.single.generated` указываете runtime-параметры контейнера Amnezia (`AMNEZIA_CONTAINER_NAME`, `AMNEZIA_INTERFACE_NAME`) и путь к Xray config (`XRAY_SOURCE_CONFIG_PATH`).
-3. Запускаете **одну команду**:
-
-```bash
-make single
+```text
+[ Telegram / Admin / API clients ]
+                |
+                v
+        +-------------------+
+        |   Control-plane   |
+        |  (HTTP API, DB)   |
+        +-------------------+
+          |           |
+          |           +--> Postgres (state, billing, devices, traffic)
+          +--> Redis (cache/state/replay guard)
+          |
+          v
+    +-------------------+    (x N nodes)
+    |    Node-agent     |----> runtime: AmneziaWG/Xray
+    +-------------------+
 ```
 
-Что делает `make single`:
-- читает runtime-файлы Amnezia/Xray и обновляет env (`scripts/sync-runtime-from-configs.sh`);
-- поднимает только app stack: `postgres`, `redis`, `migrate`, `control-plane`, `node-agent`.
+## Текущая структура для разделения по сервисам
 
-## Быстрый старт
+- `services/control-plane/` — всё для запуска и эксплуатации control-plane (свой `README`, `docker-compose.yml`, `.env.example`, `Makefile`).
+- `services/node-agent/` — всё для запуска и эксплуатации node-agent (свой `README`, `docker-compose.yml`, `.env.example`, `Makefile`).
+- `shared/contracts/` — общий контракт node <-> control-plane.
 
-```bash
-cp deploy/env/single-server.env.example .env.single.generated
-# заполните секреты + container names + source paths
-make single
-```
+## Где что запускать
 
-Проверки:
+### Control-plane
 
 ```bash
-make ps-single
-curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:8081/health
+cp services/control-plane/.env.example services/control-plane/.env.generated
+make -C services/control-plane up
 ```
 
-## Откуда берутся runtime-данные
-
-`scripts/sync-runtime-from-configs.sh` подтягивает:
-- из runtime Amnezia через `docker exec ... awg show`: `VPN_SERVER_PUBLIC_KEY`, `AMNEZIA_PORT`;
-- из runtime Amnezia через `ip addr show`: `VPN_SUBNET_CIDR` (если доступно);
-- из `XRAY_SOURCE_CONFIG_PATH`: `XRAY_REALITY_PORT`, `XRAY_REALITY_SERVER_NAME`, `XRAY_REALITY_SHORT_ID`;
-- из env: `XRAY_REALITY_PRIVATE_KEY`, `XRAY_REALITY_PUBLIC_KEY` (единый источник ключей);
-- из `VPN_PUBLIC_HOST` + `AMNEZIA_PORT`: `VPN_SERVER_PUBLIC_ENDPOINT`.
-
-`scripts/sync-runtime-from-configs.sh` валидирует, что `privateKey` в runtime Xray config совпадает с `XRAY_REALITY_PRIVATE_KEY`; при рассинхроне завершает работу с ошибкой.
-
-## Runtime logic (не меняли)
-
-Сохранена рабочая логика:
-- add/remove peer в Amnezia через `node-agent`;
-- модификация Xray config и добавление клиента;
-- выдача/скачивание клиентских конфигов через `control-plane`;
-- Telegram pipeline выдачи конфига.
-
-## Build/Test
+### Node-agent
 
 ```bash
-go test ./...
+cp services/node-agent/.env.example services/node-agent/.env.generated
+make -C services/node-agent up
 ```
+
+## Важно
+
+- Это всё ещё единый monorepo, но operational артефакты разложены по сервисным директориям для дальнейшего физического split в отдельные git-репозитории.
+- Исторические compose/env в корне можно считать legacy-совместимостью; канонические entrypoints теперь в `services/*`.
