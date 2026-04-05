@@ -84,13 +84,15 @@ const (
 )
 
 const (
-	cbDeviceViewPrefix          = "d:v:"
-	cbDeviceWgDownloadPrefix    = "d:wg:dl:"
-	cbDeviceXrayDownloadPrefix  = "d:xr:dl:"
-	cbDeviceWgReissuePrefix     = "d:wg:re:"
-	cbDeviceXrayReissuePrefix   = "d:xr:re:"
-	cbDeviceDeletePrefix        = "d:del:"
-	cbDeviceBack                = "d:back"
+	cbDeviceViewPrefix         = "d:v:"
+	cbDeviceWgDownloadPrefix   = "d:wg:dl:"
+	cbDeviceXrayDownloadPrefix = "d:xr:dl:"
+	cbDeviceWgReissuePrefix    = "d:wg:re:"
+	cbDeviceXrayReissuePrefix  = "d:xr:re:"
+	cbDeviceDeletePrefix       = "d:del:"
+	cbDeviceBack               = "d:back"
+	cbNodeDisablePrefix        = "a:nd:disable:"
+	cbNodeEnablePrefix         = "a:nd:enable:"
 )
 
 type registerUserUseCase interface {
@@ -434,6 +436,19 @@ func (s *TelegramService) handleCallback(ctx context.Context, cb *CallbackQuery)
 }
 
 func (s *TelegramService) handleAdminCallback(ctx context.Context, cb *CallbackQuery, chatID int64, u *user.User) bool {
+	if strings.HasPrefix(cb.Data, cbNodeDisablePrefix) {
+		nodeID := strings.TrimPrefix(cb.Data, cbNodeDisablePrefix)
+		s.adminSetNodeLifecycle(ctx, chatID, u.ID, strings.TrimSpace(nodeID), node.StatusDraining)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Нода отключена (draining)")
+		return true
+	}
+	if strings.HasPrefix(cb.Data, cbNodeEnablePrefix) {
+		nodeID := strings.TrimPrefix(cb.Data, cbNodeEnablePrefix)
+		s.adminSetNodeLifecycle(ctx, chatID, u.ID, strings.TrimSpace(nodeID), node.StatusActive)
+		_ = s.Bot.AnswerCallbackQuery(ctx, cb.ID, "Нода включена")
+		return true
+	}
+
 	switch cb.Data {
 	case cbAdminMenu:
 		_ = s.Bot.SendMessage(ctx, chatID, "Админка:", adminMenu())
@@ -542,7 +557,7 @@ func (s *TelegramService) sendMainMenu(ctx context.Context, chatID int64, u *use
 			statusText = "Приостановлен из-за нулевого баланса"
 		}
 	}
-	text := fmt.Sprintf("Добро пожаловать в RyazanVPN 👋\n\nБаланс: %s\nСтатус доступа: %s", formatRub(balance), statusText)
+	text := fmt.Sprintf("Добро пожаловать в RyazanVPN 👋\n\nБаланс: %s\nСтатус доступа: %s\nКонтакт: @wzcont", formatRub(balance), statusText)
 	_ = s.Bot.SendMessage(ctx, chatID, text, mainMenu(isAdmin))
 	if isAdmin {
 		_ = s.Bot.SendMessage(ctx, chatID, "Админ-меню:", adminMenu())
@@ -955,7 +970,7 @@ func (s *TelegramService) handleDeleteDevice(ctx context.Context, chatID, telegr
 }
 
 func (s *TelegramService) sendHelp(ctx context.Context, chatID int64) {
-	_ = s.Bot.SendMessage(ctx, chatID, "Помощь:\n• Speed (AmneziaWG) — основной быстрый режим.\n• Health (Xray Reality) — резерв для сложных сетей.\n• Если Speed нестабилен — переключитесь на Health.", backMainMenu())
+	_ = s.Bot.SendMessage(ctx, chatID, "Помощь:\n• Speed (AmneziaWG) — основной быстрый режим.\n• Health (Xray Reality) — резерв для сложных сетей.\n• Если Speed нестабилен — переключитесь на Health.\n• Контакт оператора: @wzcont.", backMainMenu())
 }
 
 func (s *TelegramService) sendBalance(ctx context.Context, chatID int64, u *user.User) {
@@ -1216,7 +1231,7 @@ func (s *TelegramService) adminRevokeUser(ctx context.Context, chatID int64, act
 }
 
 func (s *TelegramService) adminNodeStatus(ctx context.Context, chatID int64) {
-	nodes, err := s.Nodes.ListActive(ctx)
+	nodes, err := s.Nodes.ListAll(ctx)
 	if err != nil {
 		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось получить статус нод.", nil)
 		return
@@ -1224,6 +1239,7 @@ func (s *TelegramService) adminNodeStatus(ctx context.Context, chatID int64) {
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 	b := &strings.Builder{}
 	b.WriteString("Статус нод:\n")
+	rows := make([][]InlineKeyboardButton, 0, len(nodes)+1)
 	for _, n := range nodes {
 		capacity := n.UserCapacity
 		if capacity <= 0 {
@@ -1233,8 +1249,77 @@ func (s *TelegramService) adminNodeStatus(ctx context.Context, chatID int64) {
 			capacity = 40
 		}
 		fmt.Fprintf(b, "%s | active_users=%d | capacity=%d | health=%s\n", n.Name, n.CurrentLoad, capacity, n.Status)
+		if n.Status == node.StatusActive {
+			rows = append(rows, []InlineKeyboardButton{{Text: "⛔ Отключить " + n.Name, Data: cbNodeDisablePrefix + n.ID}})
+		} else {
+			rows = append(rows, []InlineKeyboardButton{{Text: "✅ Включить " + n.Name, Data: cbNodeEnablePrefix + n.ID}})
+		}
 	}
-	_ = s.Bot.SendMessage(ctx, chatID, b.String(), nil)
+	rows = append(rows, []InlineKeyboardButton{{Text: "⬅️ Админка", Data: cbBackAdmin}})
+	_ = s.Bot.SendMessage(ctx, chatID, b.String(), &InlineKeyboardMarkup{InlineKeyboard: rows})
+}
+
+func (s *TelegramService) adminSetNodeLifecycle(ctx context.Context, chatID int64, actorUserID, nodeID, targetStatus string) {
+	if strings.TrimSpace(nodeID) == "" {
+		_ = s.Bot.SendMessage(ctx, chatID, "Не указан node_id.", nil)
+		return
+	}
+	if err := s.Nodes.UpdateStatus(ctx, nodeID, targetStatus); err != nil {
+		s.logErr("admin node lifecycle update", err)
+		_ = s.Bot.SendMessage(ctx, chatID, "Не удалось изменить статус ноды.", nil)
+		return
+	}
+
+	affectedUsers, affectedDevices := s.notifyNodeDisabledUsers(ctx, nodeID, targetStatus)
+	_ = s.logAudit(ctx, actorUserID, "telegram.admin.node.lifecycle", map[string]any{
+		"node_id":            nodeID,
+		"target_status":      targetStatus,
+		"affected_users":     affectedUsers,
+		"affected_devices":   affectedDevices,
+		"bulk_reissue_queue": affectedDevices,
+	})
+
+	msg := fmt.Sprintf("Нода %s переведена в статус %s.\nAffected users=%d, devices=%d.\nОчередь migrate/reissue сформирована: %d.", nodeID, targetStatus, affectedUsers, affectedDevices, affectedDevices)
+	_ = s.Bot.SendMessage(ctx, chatID, msg, nil)
+	s.adminNodeStatus(ctx, chatID)
+}
+
+func (s *TelegramService) notifyNodeDisabledUsers(ctx context.Context, nodeID, targetStatus string) (int, int) {
+	if targetStatus == node.StatusActive {
+		return 0, 0
+	}
+	if s.Accesses == nil || s.Devices == nil || s.Users == nil {
+		return 0, 0
+	}
+	accesses, err := s.Accesses.ListActiveByNodeID(ctx, nodeID)
+	if err != nil {
+		s.logErr("list active accesses by node", err)
+		return 0, 0
+	}
+	userSet := map[string]user.User{}
+	deviceCount := 0
+	for _, acc := range accesses {
+		if acc == nil || strings.TrimSpace(acc.DeviceID) == "" {
+			continue
+		}
+		d, err := s.Devices.GetByID(ctx, acc.DeviceID)
+		if err != nil || d == nil {
+			continue
+		}
+		u, err := s.Users.GetByID(ctx, d.UserID)
+		if err != nil || u == nil {
+			continue
+		}
+		userSet[u.ID] = *u
+		deviceCount++
+	}
+	for _, u := range userSet {
+		if u.TelegramID == 0 {
+			continue
+		}
+		_ = s.Bot.SendMessage(ctx, u.TelegramID, "Нода выключена, перевыпустите доступ под новую ноду.", backMainMenu())
+	}
+	return len(userSet), deviceCount
 }
 
 func (s *TelegramService) createUniqueInviteCode(ctx context.Context, actorUserID string) (*invitecode.InviteCode, error) {

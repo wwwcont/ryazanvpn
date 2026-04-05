@@ -105,8 +105,10 @@ func TestTrafficCollectorWorker_ResolveAccess_ByPublicKey(t *testing.T) {
 
 type tcNodeRepo struct{ nodes []*node.Node }
 
-func (r *tcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }
-func (r *tcNodeRepo) GetByID(ctx context.Context, id string) (*node.Node, error) { return nil, nil }
+func (r *tcNodeRepo) ListAll(ctx context.Context) ([]*node.Node, error)                { return r.nodes, nil }
+func (r *tcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)             { return r.nodes, nil }
+func (r *tcNodeRepo) GetByID(ctx context.Context, id string) (*node.Node, error)       { return nil, nil }
+func (r *tcNodeRepo) UpdateStatus(ctx context.Context, id string, status string) error { return nil }
 func (r *tcNodeRepo) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
 	return nil
 }
@@ -163,9 +165,9 @@ func (r *tcAccessRepo) ListActiveByNodeID(ctx context.Context, nodeID string) ([
 }
 
 type tcTrafficRepo struct {
-	snapshots []*traffic.DeviceTrafficSnapshot
-	deltas    []traffic.AddDailyUsageDeltaParams
-	nodeSamples []traffic.AddNodeThroughputSampleParams
+	snapshots    []*traffic.DeviceTrafficSnapshot
+	deltas       []traffic.AddDailyUsageDeltaParams
+	nodeSamples  []traffic.AddNodeThroughputSampleParams
 	cleanupCalls int
 }
 

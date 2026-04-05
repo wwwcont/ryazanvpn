@@ -102,8 +102,10 @@ func TestPeerConsistencyWorker_ReconcileMissingPeerPath(t *testing.T) {
 
 type pcNodeRepo struct{ nodes []*node.Node }
 
-func (r *pcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)       { return r.nodes, nil }
-func (r *pcNodeRepo) GetByID(ctx context.Context, id string) (*node.Node, error) { return nil, nil }
+func (r *pcNodeRepo) ListAll(ctx context.Context) ([]*node.Node, error)                { return r.nodes, nil }
+func (r *pcNodeRepo) ListActive(ctx context.Context) ([]*node.Node, error)             { return r.nodes, nil }
+func (r *pcNodeRepo) GetByID(ctx context.Context, id string) (*node.Node, error)       { return nil, nil }
+func (r *pcNodeRepo) UpdateStatus(ctx context.Context, id string, status string) error { return nil }
 func (r *pcNodeRepo) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
 	return nil
 }
