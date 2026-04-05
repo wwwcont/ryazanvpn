@@ -19,3 +19,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./deploy/node:/etc/ryazanvpn/node:rw
+    networks:
+      - backend
+
+networks:
+  backend:
+    name: ${RYAZANVPN_SHARED_NETWORK:-ryazanvpn_shared}

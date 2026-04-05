@@ -15,10 +15,10 @@
 ```bash
 git clone <YOUR_REPO_URL> ryazanvpn
 cd ryazanvpn
-cp deploy/env/single-server.env.example .env.single.generated
+cp .env.example .env
 ```
 
-Заполните `.env.single.generated`:
+Заполните `.env`:
 - секреты (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `AGENT_HMAC_SECRET`, `ADMIN_API_SECRET`, `CONFIG_MASTER_KEY`, Telegram);
 - runtime container names (`AMNEZIA_CONTAINER_NAME`, `AMNEZIA_INTERFACE_NAME`, `XRAY_CONTAINER_NAME`);
 - source path (`XRAY_SOURCE_CONFIG_PATH`) и ключи Reality из env (`XRAY_REALITY_PRIVATE_KEY`, `XRAY_REALITY_PUBLIC_KEY`);
@@ -30,7 +30,7 @@ cp deploy/env/single-server.env.example .env.single.generated
 make single
 ```
 
-Команда сначала синхронизирует runtime-данные из файлов в `.env`, затем поднимает app stack.
+Команда сначала синхронизирует runtime-данные из `.env`, затем поднимает app stack.
 
 ## 3) Проверки
 
@@ -47,3 +47,8 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "url=${PUBLIC_BASE_URL}/internal/telegram/webhook" \
   -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
 ```
+
+Если webhook не доходит и в логах `control-plane` тишина:
+- проверьте, что reverse-proxy (`caddy`/nginx) и `control-plane` подключены к одной Docker-сети `${RYAZANVPN_SHARED_NETWORK}`;
+- для встроенного `caddy` в `docker-compose.yml` сервис `caddy` должен быть в сети `backend` вместе с `control-plane`.
+- если `caddy` запущен на хосте (не в Docker), проксируйте на `127.0.0.1:8080` и проверьте, что опубликован порт `CONTROL_PLANE_PUBLISHED_PORT`.

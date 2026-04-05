@@ -14,11 +14,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - backend
 
   redis:
     image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD}"]
+    networks:
+      - backend
 
   migrate:
     image: migrate/migrate:v4.17.1
@@ -30,6 +34,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - backend
 
   control-plane:
     build:
@@ -38,6 +44,8 @@ services:
         SERVICE: cmd/control-plane
     restart: unless-stopped
     env_file: [.env]
+    ports:
+      - "${CONTROL_PLANE_PUBLISHED_PORT:-127.0.0.1:8080:8080}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +53,8 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
+    networks:
+      - backend
 
   #caddy:
   #  image: caddy:2-alpine
@@ -57,6 +67,8 @@ services:
   #    - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
   #    - control_caddy_data:/data
   #    - control_caddy_config:/config
+  #  networks:
+  #    - backend
   #  depends_on:
   #    - control-plane
 
@@ -64,3 +76,7 @@ volumes:
   control_postgres_data:
   #control_caddy_data:
   #control_caddy_config:
+
+networks:
+  backend:
+    name: ${RYAZANVPN_SHARED_NETWORK:-ryazanvpn_shared}
