@@ -115,6 +115,9 @@ func (f *execFakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID strin
 func (f *execFakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
 	return f.entry, nil
 }
+func (f *execFakeAccess) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
+	return f.entry, nil
+}
 func (f *execFakeAccess) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {
 	return []*access.DeviceAccess{f.entry}, nil
 }
@@ -124,11 +127,17 @@ type execFakeNodes struct {
 	updatedLoad int
 }
 
+func (f *execFakeNodes) ListAll(ctx context.Context) ([]*node.Node, error) {
+	return []*node.Node{f.node}, nil
+}
 func (f *execFakeNodes) ListActive(ctx context.Context) ([]*node.Node, error) {
 	return []*node.Node{f.node}, nil
 }
 func (f *execFakeNodes) GetByID(ctx context.Context, id string) (*node.Node, error) {
 	return f.node, nil
+}
+func (f *execFakeNodes) UpdateStatus(ctx context.Context, id string, status string) error {
+	return nil
 }
 func (f *execFakeNodes) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
 	return nil

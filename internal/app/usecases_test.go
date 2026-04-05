@@ -451,8 +451,12 @@ func (f *fakeDevices) AssignNode(ctx context.Context, id string, vpnNodeID strin
 
 type fakeNodes struct{ active []*node.Node }
 
+func (f *fakeNodes) ListAll(ctx context.Context) ([]*node.Node, error)          { return f.active, nil }
 func (f *fakeNodes) ListActive(ctx context.Context) ([]*node.Node, error)       { return f.active, nil }
 func (f *fakeNodes) GetByID(ctx context.Context, id string) (*node.Node, error) { return nil, nil }
+func (f *fakeNodes) UpdateStatus(ctx context.Context, id string, status string) error {
+	return nil
+}
 func (f *fakeNodes) UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error {
 	return nil
 }
@@ -490,6 +494,9 @@ func (f *fakeAccess) GetActiveByDeviceID(ctx context.Context, deviceID string) (
 	return nil, nil
 }
 func (f *fakeAccess) GetActiveByNodeAndAssignedIP(ctx context.Context, nodeID string, assignedIP string) (*access.DeviceAccess, error) {
+	return nil, access.ErrNotFound
+}
+func (f *fakeAccess) GetActiveByNodeAndPublicKey(ctx context.Context, nodeID string, publicKey string) (*access.DeviceAccess, error) {
 	return nil, access.ErrNotFound
 }
 func (f *fakeAccess) ListActiveByNodeID(ctx context.Context, nodeID string) ([]*access.DeviceAccess, error) {

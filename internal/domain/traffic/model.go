@@ -37,6 +37,8 @@ type Repository interface {
 	GetDeviceTrafficLastNDays(ctx context.Context, deviceID string, days int, now time.Time) (int64, error)
 	GetUserTrafficTotal(ctx context.Context, userID string) (int64, error)
 	GetUserTrafficLastNDays(ctx context.Context, userID string, days int, now time.Time) (int64, error)
+	AddNodeThroughputSample(ctx context.Context, in AddNodeThroughputSampleParams) error
+	CleanupNodeThroughputSamples(ctx context.Context, olderThan time.Time) error
 }
 
 type CreateSnapshotParams struct {
@@ -58,4 +60,15 @@ type AddDailyUsageDeltaParams struct {
 	MonthDate time.Time
 	RXDelta   int64
 	TXDelta   int64
+}
+
+type AddNodeThroughputSampleParams struct {
+	NodeID      string
+	CapturedAt  time.Time
+	StepSec     int64
+	WindowSec   int64
+	RXDelta     int64
+	TXDelta     int64
+	PeerCount   int
+	ResolvedPeers int
 }
