@@ -108,6 +108,22 @@ WHERE id = $1`
 	return nil
 }
 
+func (r *NodeRepository) UpdateStatus(ctx context.Context, id string, status string) error {
+	const query = `
+UPDATE vpn_nodes
+SET status = $2, updated_at = NOW()
+WHERE id = $1`
+
+	res, err := r.q.Exec(ctx, query, id, status)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return node.ErrNotFound
+	}
+	return nil
+}
+
 func (r *NodeRepository) UpdateLoad(ctx context.Context, id string, currentLoad int) error {
 	const query = `
 UPDATE vpn_nodes

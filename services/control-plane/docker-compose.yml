@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: [services/control-plane/.env.generated]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - control_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD}"]
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    restart: "no"
+    env_file: [services/control-plane/.env.generated]
+    command: ["-path", "/migrations", "-database", "${POSTGRES_URL}", "up"]
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  control-plane:
+    build:
+      context: .
+      args:
+        SERVICE: cmd/control-plane
+    restart: unless-stopped
+    env_file: [services/control-plane/.env.generated]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: [services/control-plane/.env.generated]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - control_caddy_data:/data
+      - control_caddy_config:/config
+    depends_on:
+      - control-plane
+
+volumes:
+  control_postgres_data:
+  control_caddy_data:
+  control_caddy_config:

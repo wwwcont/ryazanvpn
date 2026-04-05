@@ -28,8 +28,10 @@ type Node struct {
 }
 
 type Repository interface {
+	ListAll(ctx context.Context) ([]*Node, error)
 	ListActive(ctx context.Context) ([]*Node, error)
 	GetByID(ctx context.Context, id string) (*Node, error)
+	UpdateStatus(ctx context.Context, id string, status string) error
 	UpdateHealth(ctx context.Context, id string, status string, lastSeenAt time.Time) error
 	UpdateLoad(ctx context.Context, id string, currentLoad int) error
 }

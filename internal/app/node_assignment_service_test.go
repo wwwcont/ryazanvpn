@@ -68,3 +68,18 @@ func TestMinLoadNodeAssigner_SingleNodeModeRejectsMissingNode(t *testing.T) {
 		t.Fatalf("expected ErrNoActiveNodes, got %v", err)
 	}
 }
+
+func TestMinLoadNodeAssigner_IgnoresDrainingAndDisabledNodes(t *testing.T) {
+	assigner := MinLoadNodeAssigner{}
+	got, err := assigner.Assign([]*node.Node{
+		{ID: "n1", Status: node.StatusDraining, CurrentLoad: 1, UserCapacity: 100},
+		{ID: "n2", Status: node.StatusDisabled, CurrentLoad: 1, UserCapacity: 100},
+		{ID: "n3", Status: node.StatusActive, CurrentLoad: 2, UserCapacity: 100},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "n3" {
+		t.Fatalf("expected n3, got %s", got.ID)
+	}
+}
