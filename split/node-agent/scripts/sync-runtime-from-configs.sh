@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="${1:-.env.single.generated}"
+ENV_FILE="${1:-.env}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "sync-runtime-from-configs: env file not found: $ENV_FILE" >&2

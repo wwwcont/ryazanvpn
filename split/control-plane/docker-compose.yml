@@ -14,11 +14,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - backend
 
   redis:
     image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD}"]
+    networks:
+      - backend
 
   migrate:
     image: migrate/migrate:v4.17.1
@@ -30,6 +34,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - backend
 
   control-plane:
     build:
@@ -45,6 +51,8 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
+    networks:
+      - backend
 
   #caddy:
   #  image: caddy:2-alpine
@@ -64,3 +72,7 @@ volumes:
   control_postgres_data:
   #control_caddy_data:
   #control_caddy_config:
+
+networks:
+  backend:
+    name: ${RYAZANVPN_SHARED_NETWORK:-ryazanvpn_shared}

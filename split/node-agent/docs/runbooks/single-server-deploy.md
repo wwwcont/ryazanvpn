@@ -15,10 +15,10 @@
 ```bash
 git clone <YOUR_REPO_URL> ryazanvpn
 cd ryazanvpn
-cp deploy/env/single-server.env.example .env.single.generated
+cp .env.example .env
 ```
 
-Заполните `.env.single.generated`:
+Заполните `.env`:
 - секреты (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `AGENT_HMAC_SECRET`, `ADMIN_API_SECRET`, `CONFIG_MASTER_KEY`, Telegram);
 - runtime container names (`AMNEZIA_CONTAINER_NAME`, `AMNEZIA_INTERFACE_NAME`, `XRAY_CONTAINER_NAME`);
 - source path (`XRAY_SOURCE_CONFIG_PATH`) и ключи Reality из env (`XRAY_REALITY_PRIVATE_KEY`, `XRAY_REALITY_PUBLIC_KEY`);
@@ -30,7 +30,7 @@ cp deploy/env/single-server.env.example .env.single.generated
 make single
 ```
 
-Команда сначала синхронизирует runtime-данные из файлов в `.env`, затем поднимает app stack.
+Команда сначала синхронизирует runtime-данные из `.env`, затем поднимает app stack.
 
 ## 3) Проверки
 
