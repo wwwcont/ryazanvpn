@@ -1,9 +1,11 @@
 package app
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -218,6 +220,9 @@ func LoadConfig(serviceName string) (Config, error) {
 		}
 	case "node-agent":
 		// node-agent routes do not depend on postgres/redis in startup path.
+		if err := cfg.validateNodeAgentRuntimeConfig(); err != nil {
+			return Config{}, err
+		}
 	default:
 		if cfg.PostgresURL == "" {
 			return Config{}, errors.New("POSTGRES_URL is required")
@@ -257,6 +262,46 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (c Config) validateNodeAgentRuntimeConfig() error {
+	if !strings.EqualFold(strings.TrimSpace(c.RuntimeAdapter), "amnezia_docker") {
+		return nil
+	}
+	placeholder := map[string]string{
+		"NODE_ID":                "single-node-1",
+		"NODE_TOKEN":             "52esUBVD9Rr4hXoPE5QzlOpdgJEfUR+xeEMTHh7YSuc=",
+		"AGENT_HMAC_SECRET":      "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
+		"NODE_AGENT_HMAC_SECRET": "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
+	}
+	if c.NodeID == placeholder["NODE_ID"] || c.NodeToken == placeholder["NODE_TOKEN"] {
+		return errors.New("detected placeholder values from deploy/env/node.env.example in NODE_ID/NODE_TOKEN")
+	}
+	if c.AgentHMACSecret == placeholder["AGENT_HMAC_SECRET"] || c.NodeAgentSecret == placeholder["NODE_AGENT_HMAC_SECRET"] {
+		return errors.New("detected placeholder AGENT_HMAC_SECRET/NODE_AGENT_HMAC_SECRET from deploy/env/node.env.example")
+	}
+	if c.AmneziaContainerName == "" || c.AmneziaInterfaceName == "" {
+		return errors.New("AMNEZIA_CONTAINER_NAME and AMNEZIA_INTERFACE_NAME are required")
+	}
+	if c.AmneziaPort == "" {
+		return errors.New("AMNEZIA_PORT is required")
+	}
+	if _, err := strconv.Atoi(c.AmneziaPort); err != nil {
+		return fmt.Errorf("AMNEZIA_PORT must be numeric: %w", err)
+	}
+	if c.XrayContainerName == "" || c.XrayRealityPrivateKey == "" || c.XrayRealityPublicKey == "" {
+		return errors.New("XRAY_CONTAINER_NAME, XRAY_REALITY_PRIVATE_KEY and XRAY_REALITY_PUBLIC_KEY are required")
+	}
+	for _, secret := range []string{c.AgentHMACSecret, c.NodeAgentSecret} {
+		if _, err := base64.StdEncoding.DecodeString(secret); err != nil {
+			return fmt.Errorf("hmac secret must be base64: %w", err)
+		}
+	}
+	base64URLPattern := regexp.MustCompile(`^[A-Za-z0-9_-]{43,44}$`)
+	if !base64URLPattern.MatchString(c.XrayRealityPrivateKey) || !base64URLPattern.MatchString(c.XrayRealityPublicKey) {
+		return errors.New("XRAY_REALITY_PRIVATE_KEY/XRAY_REALITY_PUBLIC_KEY must be base64url-like")
+	}
+	return nil
 }
 
 func intFromEnv(key string, fallback int) int {
