@@ -268,13 +268,6 @@ func (c Config) validateNodeAgentRuntimeConfig() error {
 	if !strings.EqualFold(strings.TrimSpace(c.RuntimeAdapter), "amnezia_docker") {
 		return nil
 	}
-	placeholder := map[string]string{
-		"AGENT_HMAC_SECRET":      "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
-		"NODE_AGENT_HMAC_SECRET": "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
-	}
-	if c.AgentHMACSecret == placeholder["AGENT_HMAC_SECRET"] || c.NodeAgentSecret == placeholder["NODE_AGENT_HMAC_SECRET"] {
-		return errors.New("detected placeholder AGENT_HMAC_SECRET/NODE_AGENT_HMAC_SECRET from deploy/env/node.env.example")
-	}
 	if c.AmneziaContainerName == "" || c.AmneziaInterfaceName == "" {
 		return errors.New("AMNEZIA_CONTAINER_NAME and AMNEZIA_INTERFACE_NAME are required")
 	}
