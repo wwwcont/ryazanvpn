@@ -269,13 +269,8 @@ func (c Config) validateNodeAgentRuntimeConfig() error {
 		return nil
 	}
 	placeholder := map[string]string{
-		"NODE_ID":                "single-node-1",
-		"NODE_TOKEN":             "52esUBVD9Rr4hXoPE5QzlOpdgJEfUR+xeEMTHh7YSuc=",
 		"AGENT_HMAC_SECRET":      "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
 		"NODE_AGENT_HMAC_SECRET": "xG6yzhNAXO9BG77BYBD7g3DgvxahDdYm1EqztcMHGs8=",
-	}
-	if c.NodeID == placeholder["NODE_ID"] || c.NodeToken == placeholder["NODE_TOKEN"] {
-		return errors.New("detected placeholder values from deploy/env/node.env.example in NODE_ID/NODE_TOKEN")
 	}
 	if c.AgentHMACSecret == placeholder["AGENT_HMAC_SECRET"] || c.NodeAgentSecret == placeholder["NODE_AGENT_HMAC_SECRET"] {
 		return errors.New("detected placeholder AGENT_HMAC_SECRET/NODE_AGENT_HMAC_SECRET from deploy/env/node.env.example")
